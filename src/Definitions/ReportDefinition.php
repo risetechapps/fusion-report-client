@@ -23,6 +23,18 @@ abstract class ReportDefinition
         return null;
     }
 
+    /**
+     * Parâmetros a serem anexados à URL base do webhook (query string).
+     * Útil para carregar contexto que o callback precisa — ex.: tenant_id.
+     *
+     * @param array<string, mixed> $params Parâmetros já mesclados da geração
+     * @return array<string, scalar>
+     */
+    public function webhookParams(array $params = []): array
+    {
+        return [];
+    }
+
     public function owner(): ?Model
     {
         return auth()->user();
