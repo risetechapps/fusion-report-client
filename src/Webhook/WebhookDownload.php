@@ -21,6 +21,11 @@ class WebhookDownload implements \JsonSerializable
         return $this->data['download_url'] ?? '';
     }
 
+    public function expiresAt(): ?string
+    {
+        return $this->data['expires_at'] ?? null;
+    }
+
     public function toArray(): array
     {
         return $this->data;
