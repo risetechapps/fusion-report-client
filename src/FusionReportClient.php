@@ -40,6 +40,7 @@ class FusionReportClient
         $builder = $this->report($definition->template())
             ->params($merged)
             ->datasource($definition->datasource($merged))
+            ->webhookParams($definition->webhookParams($merged))
             ->setAfterGenerate(fn($generation, $context) => $definition->onGenerated($generation, $context));
 
         if ($protection = $definition->protection()) {
