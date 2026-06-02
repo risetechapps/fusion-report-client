@@ -24,6 +24,7 @@ class ReportRequestBuilder
     private ?\Closure $afterGenerate = null;
     private array $context = [];
     private ?Model $owner = null;
+    private array $webhookParams = [];
 
     public function __construct(
         private readonly FusionReportHttp $http,
@@ -112,6 +113,13 @@ class ReportRequestBuilder
         return $this;
     }
 
+    public function webhookParams(array $params): static
+    {
+        $this->webhookParams = array_merge($this->webhookParams, $params);
+
+        return $this;
+    }
+
     public function setAfterGenerate(\Closure $callback): static
     {
         $this->afterGenerate = $callback;
@@ -149,7 +157,7 @@ class ReportRequestBuilder
 
         $payload = $this->buildPayload();
 
-        $webhookUrl = $webhook ?? $this->defaultWebhook;
+        $webhookUrl = $this->buildWebhookUrl($webhook ?? $this->defaultWebhook);
         if ($webhookUrl !== null) {
             $payload['webhook_url'] = $webhookUrl;
         }
@@ -163,6 +171,17 @@ class ReportRequestBuilder
         }
 
         return $generation;
+    }
+
+    private function buildWebhookUrl(?string $base): ?string
+    {
+        if ($base === null || empty($this->webhookParams)) {
+            return $base;
+        }
+
+        $separator = str_contains($base, '?') ? '&' : '?';
+
+        return $base . $separator . http_build_query($this->webhookParams);
     }
 
     private function buildPayload(): array
