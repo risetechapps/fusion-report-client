@@ -26,6 +26,9 @@ return [
         // Ignorado nas gerações por ID de template.
         'theme' => env('FUSION_REPORT_THEME', 'default'),
 
+        // Locale padrão aplicado quando a geração não define um via ->locale().
+        'locale' => env('FUSION_REPORT_LOCALE', 'pt_BR'),
+
         'params' => [
             // 'TENANT_ID' => '123',
         ],

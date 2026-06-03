@@ -33,6 +33,7 @@ class ReportRequestBuilder
         private readonly array $defaultParams = [],
         private readonly ?string $defaultWebhook = null,
         private readonly ?string $defaultTheme = null,
+        private readonly ?string $defaultLocale = null,
     ) {
         $this->datasource = NoDatasource::make();
     }
@@ -197,7 +198,7 @@ class ReportRequestBuilder
             'params'            => $this->serializeParams(),
             'datasource_type'   => $datasourceType !== 'none' ? $datasourceType : null,
             'datasource_config' => $datasourceConfig ?: null,
-            'locale'            => $this->locale,
+            'locale'            => $this->locale ?? $this->defaultLocale,
             'report_name'       => $this->reportName,
             'fonts_base64'      => $this->fontsBase64,
             'resources_base64'  => $this->resourcesBase64,
