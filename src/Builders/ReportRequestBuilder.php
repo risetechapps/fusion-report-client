@@ -32,6 +32,7 @@ class ReportRequestBuilder
         private readonly ?string $templateId = null,
         private readonly array $defaultParams = [],
         private readonly ?string $defaultWebhook = null,
+        private readonly ?string $defaultTheme = null,
     ) {
         $this->datasource = NoDatasource::make();
     }
@@ -139,7 +140,7 @@ class ReportRequestBuilder
         );
 
         if (config('fusion-report.log_generations', true)) {
-            FusionReportGeneration::createFromGeneration($generation, $this->owner);
+            FusionReportGeneration::createFromGeneration($generation, $this->owner, $this->context);
         }
 
         if ($this->afterGenerate) {
@@ -167,7 +168,7 @@ class ReportRequestBuilder
         $generation = new GenerationResource($response, $this->http);
 
         if (config('fusion-report.log_generations', true)) {
-            FusionReportGeneration::createFromGeneration($generation, $this->owner);
+            FusionReportGeneration::createFromGeneration($generation, $this->owner, $this->context);
         }
 
         return $generation;
@@ -191,7 +192,7 @@ class ReportRequestBuilder
 
         return array_filter([
             'name'              => $this->templateId ? null : $this->template,
-            'theme'             => $this->templateId ? null : $this->theme,
+            'theme'             => $this->templateId ? null : ($this->theme ?? $this->defaultTheme),
             'format'            => $this->formats ?: null,
             'params'            => $this->serializeParams(),
             'datasource_type'   => $datasourceType !== 'none' ? $datasourceType : null,

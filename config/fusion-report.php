@@ -22,6 +22,10 @@ return [
     ],
 
     'defaults' => [
+        // Tema padrão aplicado quando a geração não define um via ->theme().
+        // Ignorado nas gerações por ID de template.
+        'theme' => env('FUSION_REPORT_THEME', 'default'),
+
         'params' => [
             // 'TENANT_ID' => '123',
         ],
