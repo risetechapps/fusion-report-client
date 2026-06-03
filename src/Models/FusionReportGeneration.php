@@ -19,6 +19,7 @@ class FusionReportGeneration extends Model
         'formats',
         'download_urls',
         'status',
+        'context',
         'loggable_type',
         'loggable_id',
     ];
@@ -26,6 +27,7 @@ class FusionReportGeneration extends Model
     protected $casts = [
         'formats'       => 'array',
         'download_urls' => 'array',
+        'context'       => 'array',
     ];
 
     public function prunable(): \Illuminate\Database\Eloquent\Builder
@@ -38,7 +40,7 @@ class FusionReportGeneration extends Model
         return $this->morphTo();
     }
 
-    public static function createFromGeneration(GenerationResource $generation, ?Model $owner = null): static
+    public static function createFromGeneration(GenerationResource $generation, ?Model $owner = null, array $context = []): static
     {
         $downloadUrls = $generation->isCompleted()
             ? $generation->files()
@@ -53,6 +55,7 @@ class FusionReportGeneration extends Model
             'formats'         => $generation->requestedFormats(),
             'download_urls'   => $downloadUrls,
             'status'          => $generation->currentStatus(),
+            'context'         => $context ?: null,
             'loggable_type'   => $owner ? get_class($owner) : null,
             'loggable_id'     => $owner?->getKey(),
         ]);
