@@ -27,10 +27,10 @@ class FusionReportWebhookHandler implements WebhookHandler
 
         $record->update($data);
 
-        $this->dispatchToDefinition($webhook);
+        $this->dispatchToDefinition($webhook, $record->context ?? []);
     }
 
-    private function dispatchToDefinition(WebhookPayload $webhook): void
+    private function dispatchToDefinition(WebhookPayload $webhook, array $context = []): void
     {
         $templateName = $webhook->templateName();
 
