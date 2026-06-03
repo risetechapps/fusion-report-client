@@ -30,7 +30,7 @@ return [
         'locale' => env('FUSION_REPORT_LOCALE', 'pt_BR'),
 
         'params' => [
-            // 'TENANT_ID' => '123',
+            // params => 123
         ],
     ],
 
@@ -40,7 +40,6 @@ return [
      * Value: ReportDefinition class
      */
     'reports' => [
-        'tenant_all' => \RiseTechApps\Tenancy\Reports\TenantAllReports::class
         // 'clientes_all' => \App\Reports\ClientesAllReport::class,
     ],
 ];
