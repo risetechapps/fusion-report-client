@@ -50,6 +50,6 @@ class FusionReportWebhookHandler implements WebhookHandler
 
         /** @var ReportDefinition $definition */
         $definition = app($definitionClass);
-        $definition->onWebhookReceived($webhook);
+        $definition->onWebhookReceived($webhook, $context);
     }
 }

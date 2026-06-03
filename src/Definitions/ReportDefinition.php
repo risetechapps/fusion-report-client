@@ -42,5 +42,5 @@ abstract class ReportDefinition
 
     public function onGenerated(GenerationResource $generation, array $context = []): void {}
 
-    public function onWebhookReceived(WebhookPayload $payload): void {}
+    public function onWebhookReceived(WebhookPayload $payload, array $context = []): void {}
 }
