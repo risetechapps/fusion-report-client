@@ -19,7 +19,8 @@ class GenerateController extends Controller
             'email'  => ['sometimes', 'email'],
         ]);
 
-        $builder = FusionReport::make($validated['name'], $validated['params'] ?? []);
+        $builder = FusionReport::make($validated['name'], $validated['params'] ?? [])
+            ->locale(app()->getLocale());
 
         if (! empty($validated['format'])) {
             $builder->format($validated['format']);
