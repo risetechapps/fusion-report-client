@@ -141,11 +141,11 @@ class ReportRequestBuilder
         );
 
         if (config('fusion-report.log_generations', true)) {
-            FusionReportGeneration::createFromGeneration($generation, $this->owner, $this->context);
+            FusionReportGeneration::createFromGeneration($generation, $this->owner, $this->persistedContext());
         }
 
         if ($this->afterGenerate) {
-            ($this->afterGenerate)($generation, $this->context);
+            ($this->afterGenerate)($generation, $this->persistedContext());
         }
 
         return $generation;
@@ -169,10 +169,31 @@ class ReportRequestBuilder
         $generation = new GenerationResource($response, $this->http);
 
         if (config('fusion-report.log_generations', true)) {
-            FusionReportGeneration::createFromGeneration($generation, $this->owner, $this->context);
+            FusionReportGeneration::createFromGeneration($generation, $this->owner, $this->persistedContext());
         }
 
         return $generation;
+    }
+
+    private function effectiveLocale(): ?string
+    {
+        return $this->locale ?? $this->defaultLocale;
+    }
+
+    /**
+     * Context persistido com a geração. Injeta o locale efetivo (resolvido do
+     * builder ou do config) sem sobrescrever um 'locale' já informado pelo caller.
+     */
+    private function persistedContext(): array
+    {
+        $context = $this->context;
+
+        $locale = $this->effectiveLocale();
+        if ($locale !== null && ! array_key_exists('locale', $context)) {
+            $context['locale'] = $locale;
+        }
+
+        return $context;
     }
 
     private function buildWebhookUrl(?string $base): ?string
@@ -198,7 +219,7 @@ class ReportRequestBuilder
             'params'            => $this->serializeParams(),
             'datasource_type'   => $datasourceType !== 'none' ? $datasourceType : null,
             'datasource_config' => $datasourceConfig ?: null,
-            'locale'            => $this->locale ?? $this->defaultLocale,
+            'locale'            => $this->effectiveLocale(),
             'report_name'       => $this->reportName,
             'fonts_base64'      => $this->fontsBase64,
             'resources_base64'  => $this->resourcesBase64,
