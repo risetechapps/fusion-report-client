@@ -40,6 +40,22 @@ abstract class ReportDefinition
         return auth()->user();
     }
 
+    /**
+     * Caminho absoluto do arquivo .jrxml a ser enviado ao servidor.
+     */
+    abstract public function templatePath(): ?string;
+
+    /**
+     * Caminho absoluto do .zip de recursos do template (imagens, sub-reports,
+     * fontes). Retorne null quando o relatório não possui recursos.
+     */
+    abstract public function resourcesPath(): ?string;
+
+    /**
+     * Descrição do template exibida no servidor.
+     */
+    abstract public function description(): ?string;
+
     public function onGenerated(GenerationResource $generation, array $context = []): void {}
 
     public function onWebhookReceived(WebhookPayload $payload, array $context = []): void {}
