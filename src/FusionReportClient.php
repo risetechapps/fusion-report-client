@@ -37,7 +37,7 @@ class FusionReportClient
 
         $merged = array_merge($definition->defaultParams(), $params);
 
-        $builder = $this->report($definition->template())
+        $builder = $this->report($definition->name())
             ->params($merged)
             ->datasource($definition->datasource($merged))
             ->webhookParams($definition->webhookParams($merged))
