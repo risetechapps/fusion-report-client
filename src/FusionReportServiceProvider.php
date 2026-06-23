@@ -4,6 +4,7 @@ namespace RiseTechApps\FusionReport;
 
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\ServiceProvider;
+use RiseTechApps\FusionReport\Console\Commands\SyncReportsCommand;
 use RiseTechApps\FusionReport\Contracts\WebhookHandler;
 use RiseTechApps\FusionReport\Http\FusionReportHttp;
 use RiseTechApps\FusionReport\Models\FusionReportGeneration;
@@ -40,6 +41,10 @@ class FusionReportServiceProvider extends ServiceProvider
         });
 
         if ($this->app->runningInConsole()) {
+            $this->commands([
+                SyncReportsCommand::class,
+            ]);
+
             $this->publishes([
                 __DIR__ . '/../config/fusion-report.php' => config_path('fusion-report.php'),
             ], 'fusion-report');
