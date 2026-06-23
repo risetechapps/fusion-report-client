@@ -17,6 +17,7 @@ class TemplateManager
         $response = $this->http->get('/api/v1/reports');
 
         return collect($response['data'] ?? [])->map(fn(array $item) => new TemplateResource($item));
+
     }
 
     public function find(string $id): TemplateResource
