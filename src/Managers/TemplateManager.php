@@ -92,7 +92,9 @@ class TemplateManager
     {
         $response = $this->http->get("/api/v1/reports/{$id}/generations");
 
-        return collect($response)->map(fn(array $item) => new GenerationResource($item, $this->http));
+        $items = $response['data'] ?? $response;
+
+        return collect($items)->map(fn(array $item) => new GenerationResource($item, $this->http));
     }
 
     /** @return Collection<int, GenerationResource> */
@@ -100,6 +102,8 @@ class TemplateManager
     {
         $response = $this->http->get("/api/v1/reports/name/{$name}/generations");
 
-        return collect($response)->map(fn(array $item) => new GenerationResource($item, $this->http));
+        $items = $response['data'] ?? $response;
+
+        return collect($items)->map(fn(array $item) => new GenerationResource($item, $this->http));
     }
 }
