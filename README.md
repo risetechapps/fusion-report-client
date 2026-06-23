@@ -32,13 +32,29 @@ php artisan vendor:publish --tag=fusion-report
 return [
     'api_key' => env('FUSION_REPORT_API_KEY'),
 
+    // Persiste cada geração na tabela fusion_report_generations
+    'log_generations' => env('FUSION_REPORT_LOG_GENERATIONS', true),
+
     'webhook' => [
-        'url'     => env('FUSION_REPORT_WEBHOOK_URL'),
-        'secret'  => env('FUSION_REPORT_WEBHOOK_SECRET'),
-        'handler' => null, // \App\Handlers\FusionReportWebhookHandler::class
+        'url'    => env('FUSION_REPORT_WEBHOOK_URL'),
+        'secret' => env('FUSION_REPORT_WEBHOOK_SECRET'),
+
+        // Path e middleware da rota que recebe o callback do servidor.
+        // O package é agnóstico de contexto: a app hospedeira injeta aqui
+        // o middleware que estabelece o contexto necessário (tenancy, auth,
+        // etc.) ANTES do controller rodar. Ver a seção "Webhook".
+        'path'       => env('FUSION_REPORT_WEBHOOK_PATH', '/fusion/webhook'),
+        'middleware' => ['api'],
     ],
 
     'defaults' => [
+        // Tema padrão aplicado quando a geração não define um via ->theme().
+        // Ignorado nas gerações por ID de template.
+        'theme' => env('FUSION_REPORT_THEME', 'default'),
+
+        // Locale padrão aplicado quando a geração não define um via ->locale().
+        'locale' => env('FUSION_REPORT_LOCALE', 'pt_BR'),
+
         'params' => [
             // Parâmetros enviados em toda geração automaticamente
             // 'TENANT_ID' => '123',
@@ -56,6 +72,8 @@ return [
 
 ```env
 FUSION_REPORT_API_KEY=sua_api_key
+FUSION_REPORT_THEME=default
+FUSION_REPORT_LOCALE=pt_BR
 FUSION_REPORT_WEBHOOK_URL=https://seu-projeto.com/fusion/webhook
 FUSION_REPORT_WEBHOOK_SECRET=seu_secret
 ```
@@ -167,13 +185,34 @@ use RiseTechApps\FusionReport\Datasources\Contracts\Datasource;
 use RiseTechApps\FusionReport\Datasources\InlineJsonDatasource;
 use RiseTechApps\FusionReport\Definitions\ReportDefinition;
 use RiseTechApps\FusionReport\Definitions\ReportProtection;
+use RiseTechApps\FusionReport\Definitions\ThemeFusion;
 use RiseTechApps\FusionReport\Resources\GenerationResource;
+use RiseTechApps\FusionReport\Webhook\WebhookPayload;
 
 class ClientesAllReport extends ReportDefinition
 {
-    public function template(): string
+    public function name(): string
     {
         return 'client_all';
+    }
+
+    // ── Usado pelo comando fusion-report:sync (registro de templates) ──
+    //
+    // No servidor a identidade de um template é o par (name + theme), então
+    // cada ThemeFusion é um template distinto, com seu próprio .jrxml e resources.
+
+    public function themes(): array
+    {
+        return [
+            ThemeFusion::make('default')
+                ->from(resource_path('reports/client_all/default.jrxml'))
+                ->withResources(resource_path('reports/client_all/default.zip'))
+                ->describedAs('Relatório consolidado de clientes'),
+
+            // Cada tema tem seu próprio arquivo; resources/description são opcionais.
+            ThemeFusion::make('blue')
+                ->from(resource_path('reports/client_all/blue.jrxml')),
+        ];
     }
 
     public function datasource(array $params = []): Datasource
@@ -196,6 +235,14 @@ class ClientesAllReport extends ReportDefinition
         return ReportProtection::password('secreta123'); // opcional
     }
 
+    public function webhookParams(array $params = []): array
+    {
+        // Parâmetros anexados à URL base do webhook (query string).
+        // Útil para carregar contexto que o callback precisa restabelecer.
+        // Ex.: em apps multi-tenant, identificar o tenant na volta.
+        return ['tenant_id' => tenancy()->getKey()];
+    }
+
     public function onGenerated(GenerationResource $generation, array $context = []): void
     {
         // Executado automaticamente após geração síncrona
@@ -205,8 +252,42 @@ class ClientesAllReport extends ReportDefinition
 
         dispatch(new ProcessReportJob($generation->id()));
     }
+
+    public function onWebhookReceived(WebhookPayload $payload, array $context = []): void
+    {
+        // Executado automaticamente quando o callback da geração assíncrona
+        // chega — desde que o template_name do payload bata com name().
+        // O $context é o mesmo informado no disparo (->context([...])).
+        if (! $payload->isSuccess()) {
+            return;
+        }
+
+        if ($context['send_email'] ?? false) {
+            Mail::to($context['email'])->send(new ReportReadyMail($payload));
+        }
+
+        dispatch(new ProcessReportJob($payload->uuid()));
+    }
 }
 ```
+
+> **Context no fluxo assíncrono.** Em `onGenerated` (síncrono) o `$context` chega
+> direto por parâmetro. No `onWebhookReceived` (assíncrono) o callback é uma
+> requisição nova, então o `context` informado no disparo é **persistido** com a
+> geração e o package o **recarrega e injeta** automaticamente no segundo
+> parâmetro — você não precisa consultar nada. Requer `log_generations`
+> habilitado (default).
+>
+> O package ainda injeta no context o **`locale` efetivo** da geração (o de
+> `->locale()` ou, na falta, o `defaults.locale` do config), disponível como
+> `$context['locale']` nos dois hooks. Um `locale` que você já tenha colocado no
+> context manualmente é preservado (não é sobrescrito).
+
+> **`webhookParams()`** — os parâmetros retornados são anexados como query
+> string à URL base (`webhook.url`) **apenas** no `generateAsync()`. A URL
+> final fica, por exemplo, `https://seu-app.com/fusion/webhook?tenant_id=abc`.
+> Recebe os params já mesclados da geração, então você pode derivar valores
+> do próprio relatório. Retorne `[]` (default) para não anexar nada.
 
 Registre no config:
 
@@ -215,6 +296,35 @@ Registre no config:
     'client_all' => \App\Reports\ClientesAllReport::class,
 ],
 ```
+
+### Sincronizar templates com o servidor
+
+O comando `fusion-report:sync` registra no servidor os templates definidos em
+`fusion-report.reports`, expandindo o `themes()` de cada definition: **cada
+`ThemeFusion` vira um template `(name + theme)` independente**. Ele primeiro lista o
+que já existe no servidor (`templates()->list()`, indexado por `name + theme`) e
+decide a ação por **tema**:
+
+```bash
+# Cadastra apenas os temas ainda não registrados (ignora os existentes)
+php artisan fusion-report:sync
+
+# Também atualiza os que já estão registrados
+php artisan fusion-report:sync --force
+```
+
+| Situação | Sem `--force` | Com `--force` |
+|---|---|---|
+| Tema novo `(name + theme)` | cadastra (`upload`) | cadastra (`upload`) |
+| Tema já registrado | ignora | atualiza (`updateByName`) |
+| `themes()` vazio | falha (pula a definition) | falha (pula a definition) |
+| `ThemeFusion` sem `->from()` / arquivo inexistente | falha (pula o tema) | falha (pula o tema) |
+
+- O nome do tema é o que você passa em `ThemeFusion::make('...')` — não há mais um
+  `defaults.theme` global no registro.
+- `->withResources()` é opcional: sem ele, o template é registrado sem recursos.
+- Cada tema é processado isoladamente: uma falha não aborta os demais; o comando
+  retorna código de saída diferente de zero se houver qualquer falha.
 
 ### Geração síncrona
 
@@ -388,50 +498,75 @@ $novaGeracao = FusionReport::file($frpId)->export('pdf');
 
 ## Webhook
 
-O package registra automaticamente a rota `POST /fusion/webhook`.
+O package registra automaticamente a rota do callback (default `POST /fusion/webhook`). Quando a geração assíncrona termina, o servidor faz POST nessa rota e o package:
 
-### 1. Crie o handler no seu app
+1. Verifica a assinatura HMAC (se `webhook.secret` estiver configurado).
+2. Atualiza o registro em `fusion_report_generations` (status + URLs).
+3. Chama `onWebhookReceived()` da `ReportDefinition` cujo `name()` bate com o `template_name` do payload.
+
+### 1. Reagindo ao callback — `onWebhookReceived()` (recomendado)
+
+Basta implementar `onWebhookReceived()` na sua `ReportDefinition` (ver exemplo na seção *Report Definitions*). O package faz o roteamento pelo `template_name` automaticamente — você não precisa de rota nem handler próprios.
+
+### 2. Handler customizado (opcional)
+
+Para lógica global (independente de template), rebinde o contrato `WebhookHandler` num service provider seu:
 
 ```php
-namespace App\Handlers;
-
 use RiseTechApps\FusionReport\Contracts\WebhookHandler;
-use RiseTechApps\FusionReport\Webhook\WebhookPayload;
 
-class FusionReportWebhookHandler implements WebhookHandler
+$this->app->bind(WebhookHandler::class, \App\Handlers\MeuWebhookHandler::class);
+```
+
+### Contexto da requisição (multi-tenant, auth, etc.)
+
+O callback chega do servidor externo **sem** o contexto da sua aplicação. Como o package é agnóstico de contexto, a rota do webhook usa o middleware definido em `webhook.middleware` — é aí que a app hospedeira estabelece o que precisar **antes** do handler rodar.
+
+Exemplo multi-tenant: a definition anexa o `tenant_id` na URL via `webhookParams()`, e um middleware seu lê esse valor e inicializa o tenant — assim a query da geração já cai no banco correto:
+
+```php
+// app/Http/Middleware/InitializeFusionTenant.php
+public function handle(Request $request, Closure $next)
 {
-    public function handle(WebhookPayload $webhook): void
-    {
-        if ($webhook->isSuccess()) {
-            foreach ($webhook->downloads() as $download) {
-                $download->format();   // 'pdf'
-                $download->filename(); // 'relatorio.pdf'
-                $download->url();      // URL do arquivo
-            }
-
-            dispatch(new ProcessReportJob($webhook->uuid()));
-        }
-
-        if ($webhook->isFailed()) {
-            logger()->error("Geração falhou: {$webhook->error()}");
-        }
+    if ($tenantId = $request->query('tenant_id')) {
+        tenancy()->initialize($tenantId);
     }
+
+    return $next($request);
 }
 ```
 
-### 2. Registre no config
-
 ```php
+// config/fusion-report.php
 'webhook' => [
-    'url'     => env('FUSION_REPORT_WEBHOOK_URL'),
-    'secret'  => env('FUSION_REPORT_WEBHOOK_SECRET'),
-    'handler' => \App\Handlers\FusionReportWebhookHandler::class,
+    // ...
+    'middleware' => ['api', \App\Http\Middleware\InitializeFusionTenant::class],
 ],
 ```
 
-### 3. Verificação de assinatura
+### API do payload
 
-A verificação HMAC é feita automaticamente pelo package quando `secret` está configurado. Para uso manual:
+```php
+$payload->uuid();          // ID da geração
+$payload->status();        // 'completed' | 'failed' | ...
+$payload->isSuccess();     // status === 'completed'
+$payload->isFailed();      // status === 'failed'
+$payload->templateName();  // nome do template
+$payload->frpId();         // ID do .frp (re-exportar depois)
+$payload->error();         // mensagem de erro (quando falhou)
+$payload->downloads();     // Collection<WebhookDownload>
+
+foreach ($payload->downloads() as $download) {
+    $download->format();     // 'pdf'
+    $download->filename();   // 'relatorio.pdf'
+    $download->url();        // URL de download (chave download_url)
+    $download->expiresAt();  // expiração da URL (ou null)
+}
+```
+
+### Verificação de assinatura
+
+A verificação HMAC é feita automaticamente pelo package quando `webhook.secret` está configurado. Para uso manual:
 
 ```php
 use RiseTechApps\FusionReport\Webhook\WebhookPayload;
