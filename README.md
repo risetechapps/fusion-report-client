@@ -309,16 +309,31 @@ decide a ação por **tema**:
 # Cadastra apenas os temas ainda não registrados (ignora os existentes)
 php artisan fusion-report:sync
 
-# Também atualiza os que já estão registrados
+# Seleção interativa: escolhe quais temas já registrados atualizar
 php artisan fusion-report:sync --force
+
+# Atualiza TODOS os temas já registrados, sem perguntar
+php artisan fusion-report:sync --all
 ```
 
-| Situação | Sem `--force` | Com `--force` |
-|---|---|---|
-| Tema novo `(name + theme)` | cadastra (`upload`) | cadastra (`upload`) |
-| Tema já registrado | ignora | atualiza (`updateByName`) |
-| `themes()` vazio | falha (pula a definition) | falha (pula a definition) |
-| `ThemeFusion` sem `->from()` / arquivo inexistente | falha (pula o tema) | falha (pula o tema) |
+| Situação | `sync` | `sync --force` | `sync --all` |
+|---|---|---|---|
+| Tema novo `(name + theme)` | cadastra (`upload`) | não toca¹ | cadastra (`upload`) |
+| Tema já registrado | ignora | atualiza só se selecionado | atualiza (`updateByName`) |
+| `themes()` vazio | falha (pula a definition) | — | falha (pula a definition) |
+| `ThemeFusion` sem `->from()` / arquivo inexistente | falha (pula o tema) | falha (pula o tema) | falha (pula o tema) |
+
+¹ `--force` é **cirúrgico**: lista só os temas já registrados num seletor
+(`multiselect`), processa **apenas os marcados** e ignora todo o resto — a barra de
+progresso reflete só o trabalho real. Para cadastrar temas novos use o `sync`
+normal ou `--all`.
+
+- **`--force`** abre um seletor interativo dos temas já registrados; marque quais
+  reenviar (espaço marca, Enter confirma). Sem terminal interativo (ex.: CI) ele
+  cai para o comportamento de atualizar todos os registrados.
+- **`--all`** atualiza todos os registrados e cadastra os novos, sem prompt — útil
+  em pipelines / deploy.
+- Se nada for selecionado no `--force`, o comando informa e sai sem alterações.
 
 - O nome do tema é o que você passa em `ThemeFusion::make('...')` — não há mais um
   `defaults.theme` global no registro.
