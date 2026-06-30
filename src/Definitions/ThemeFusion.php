@@ -5,18 +5,18 @@ namespace RiseTechApps\FusionReport\Definitions;
 use RiseTechApps\FusionReport\Exceptions\FusionReportException;
 
 /**
- * Descreve um tema de um relatório.
+* Describes a theme of a report.
  *
- * No servidor a identidade de um template é o par (name + theme), portanto cada
- * ThemeFusion corresponde a um template distinto, com seu próprio arquivo .jrxml,
- * resources e descrição.
+ * On the server, the identity of a template is the pair (name + theme), so each
+ * ThemeFusion corresponds to a distinct template, with its own .jrxml file,
+ * Resources and description.
  *
- * Construção fluente:
+ * Fluent Construction:
  *
- *   ThemeFusion::make('default')
- *       ->from(base_path('reports/tenant_all/default.jrxml'))
- *       ->withResources(base_path('reports/tenant_all/default.zip'))
- *       ->describedAs('Tenant Report');
+ * ThemeFusion::make('default')
+ * ->from(base_path('reports/tenant_all/default.jrxml'))
+ * ->withResources(base_path('reports/tenant_all/default.zip'))
+ * ->describedAs('Tenant Report');
  */
 final class ThemeFusion
 {
@@ -34,7 +34,7 @@ final class ThemeFusion
     }
 
     /**
-     * Caminho absoluto do arquivo .jrxml deste tema.
+     * Absolute path of the .jrxml file of this theme.
      */
     public function from(string $path): self
     {
@@ -44,7 +44,7 @@ final class ThemeFusion
     }
 
     /**
-     * Caminho absoluto do .zip de recursos (imagens, sub-reports, fontes).
+     * Absolute path of the .zip of resources (images, sub-reports, sources).
      */
     public function withResources(?string $resources): self
     {
@@ -54,7 +54,7 @@ final class ThemeFusion
     }
 
     /**
-     * Descrição exibida no servidor.
+     * Description displayed on the server.
      */
     public function describedAs(?string $description): self
     {
@@ -84,22 +84,22 @@ final class ThemeFusion
     }
 
     /**
-     * Valida que o tema está pronto para ser enviado ao servidor.
+     * Validates that the theme is ready to be sent to the server.
      *
      * @throws FusionReportException
      */
     public function validate(): void
     {
         if (empty($this->path)) {
-            throw new FusionReportException("Tema '{$this->name}': arquivo .jrxml não definido (use ->from()).");
+            throw new FusionReportException("Theme '{$this->name}': .jrxml file not defined (use ->from()).");
         }
 
         if (! is_file($this->path)) {
-            throw new FusionReportException("Tema '{$this->name}': arquivo não encontrado em {$this->path}.");
+            throw new FusionReportException("Theme '{$this->name}': File not found in {$this->path}.");
         }
 
         if ($this->resources !== null && ! is_file($this->resources)) {
-            throw new FusionReportException("Tema '{$this->name}': resources não encontrado em {$this->resources}.");
+            throw new FusionReportException("Theme '{$this->name}': Resources not found in {$this->resources}.");
         }
     }
 }

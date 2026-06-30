@@ -17,10 +17,10 @@ abstract class ReportDefinition
     abstract public function datasource(array $params = []): Datasource;
 
     /**
-     * Temas disponíveis para este relatório.
+     * Topics available for this report.
      *
-     * No servidor a identidade de um template é (name + theme), portanto cada
-     * tema é um template distinto, com seu próprio arquivo .jrxml e resources.
+     * On the server the identity of a template is (name + theme), so each
+     * Theme is a distinct template, with its own .jrxml file and resources.
      *
      * @return array<int, ThemeFusion>
      */
@@ -37,10 +37,10 @@ abstract class ReportDefinition
     }
 
     /**
-     * Parâmetros a serem anexados à URL base do webhook (query string).
-     * Útil para carregar contexto que o callback precisa — ex.: tenant_id.
+     * Parameters to be appended to the webhook base URL (query string).
+     * Useful for loading context that the callback needs — e.g., tenant_id.
      *
-     * @param array<string, mixed> $params Parâmetros já mesclados da geração
+     * @param array<string, mixed> $params Parameters already merged from generation
      * @return array<string, scalar>
      */
     public function webhookParams(array $params = []): array
