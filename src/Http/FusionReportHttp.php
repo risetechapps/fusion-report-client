@@ -9,7 +9,7 @@ use RiseTechApps\FusionReport\Exceptions\ReportNotFoundException;
 
 class FusionReportHttp
 {
-    public const BASE_URL = 'https://report.risetech.dev.br';
+    public const BASE_URL = 'https://fusionreport.app.br';
 
     public function __construct(private readonly array $config) {}
 
