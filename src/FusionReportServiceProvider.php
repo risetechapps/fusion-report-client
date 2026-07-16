@@ -12,6 +12,7 @@ use RiseTechApps\FusionReport\Webhook\FusionReportWebhookHandler;
 
 class FusionReportServiceProvider extends ServiceProvider
 {
+    #[\Override]
     public function register(): void
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/fusion-report.php', 'fusion-report');

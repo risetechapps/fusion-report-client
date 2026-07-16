@@ -41,7 +41,7 @@ class FusionReportWebhookHandler implements WebhookHandler
         $reports = config('fusion-report.reports', []);
 
         $definitionClass = collect($reports)->first(
-            fn($class) => (new $class())->name() === $templateName
+            fn($class) => new $class()->name() === $templateName
         );
 
         if ($definitionClass === null) {

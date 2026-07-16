@@ -56,7 +56,7 @@ class FusionReportGeneration extends Model
             'download_urls'   => $downloadUrls,
             'status'          => $generation->currentStatus(),
             'context'         => $context ?: null,
-            'loggable_type'   => $owner ? get_class($owner) : null,
+            'loggable_type'   => $owner ? $owner::class : null,
             'loggable_id'     => $owner?->getKey(),
         ]);
     }

@@ -20,7 +20,7 @@ class InlineCsvDatasource implements Datasource
     public static function fromRows(array $rows, string $separator = ','): static
     {
         $lines = array_map(
-            fn(array $row) => implode($separator, array_map('strval', array_values($row))),
+            fn(array $row) => implode($separator, array_map(strval(...), array_values($row))),
             $rows
         );
 
