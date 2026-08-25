@@ -11,14 +11,47 @@ class TemplateManager
 {
     public function __construct(private readonly FusionReportHttp $http) {}
 
-    /** @return Collection<int, TemplateResource> */
+    /**
+     * Lista todos os templates registrados, percorrendo todas as páginas.
+     *
+     * O servidor responde `data.reports` com o paginator serializado
+     * (`{current_page, data: [...], last_page, ...}`), então os itens ficam um
+     * nível abaixo. Sem paginar, o sync trataria templates das páginas
+     * seguintes como não registrados e os reenviaria.
+     *
+     * @return Collection<int, TemplateResource>
+     */
     public function list(): Collection
     {
-        $response = $this->http->get('/api/v1/reports');
+        $items = collect();
+        $page = 1;
 
-        $items = $response['reports'] ?? $response['data'] ?? $response;
+        do {
+            $response = $this->http->get('/api/v1/reports', [
+                'page'     => $page,
+                'per_page' => 100,
+            ]);
 
-        return collect($items)->map(fn(array $item) => new TemplateResource($item));
+            $paginator = $response['reports'] ?? $response;
+
+            $items = $items->concat($this->items($paginator));
+
+            $lastPage = (int) ($paginator['last_page'] ?? 1);
+            $page++;
+        } while ($page <= $lastPage);
+
+        return $items->map(fn(array $item) => new TemplateResource($item));
+    }
+
+    /**
+     * Extrai a lista de itens de um payload que pode vir paginado
+     * (`{current_page, data: [...], ...}`) ou já como array simples.
+     */
+    private function items(array $payload): array
+    {
+        $items = $payload['data'] ?? $payload;
+
+        return is_array($items) && array_is_list($items) ? $items : [];
     }
 
     public function find(string $id): TemplateResource
@@ -92,9 +125,8 @@ class TemplateManager
     {
         $response = $this->http->get("/api/v1/reports/{$id}/generations");
 
-        $items = $response['data'] ?? $response;
-
-        return collect($items)->map(fn(array $item) => new GenerationResource($item, $this->http));
+        return collect($this->items($response))
+            ->map(fn(array $item) => new GenerationResource($item, $this->http));
     }
 
     /** @return Collection<int, GenerationResource> */
@@ -102,8 +134,7 @@ class TemplateManager
     {
         $response = $this->http->get("/api/v1/reports/name/{$name}/generations");
 
-        $items = $response['data'] ?? $response;
-
-        return collect($items)->map(fn(array $item) => new GenerationResource($item, $this->http));
+        return collect($this->items($response))
+            ->map(fn(array $item) => new GenerationResource($item, $this->http));
     }
 }
