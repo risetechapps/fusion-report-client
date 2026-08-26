@@ -4,6 +4,16 @@ namespace RiseTechApps\FusionReport\Managers;
 
 use RiseTechApps\FusionReport\Http\FusionReportHttp;
 
+/**
+ * Monitoramento do servidor Jasper.
+ *
+ * ATENÇÃO: todas as rotas `/api/v1/jasper/*` são restritas ao dashboard
+ * (Sanctum) — expõem estado global do servidor Java, que não é escopado por
+ * cliente. Autenticado por `X-API-KEY`, o servidor responde 401 e o package
+ * converte em `FusionReportException`.
+ *
+ * Ver "Métodos indisponíveis via X-API-KEY" no README.
+ */
 class JasperManager
 {
     public function __construct(private readonly FusionReportHttp $http) {}

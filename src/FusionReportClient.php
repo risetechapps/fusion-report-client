@@ -63,6 +63,7 @@ class FusionReportClient
             defaultWebhook: $this->config['webhook']['url'] ?? null,
             defaultTheme: $this->config['defaults']['theme'] ?? null,
             defaultLocale: $this->config['defaults']['locale'] ?? null,
+            defaultFormat: $this->config['defaults']['format'] ?? null,
         );
     }
 
@@ -75,6 +76,7 @@ class FusionReportClient
             defaultWebhook: $this->config['webhook']['url'] ?? null,
             defaultTheme: $this->config['defaults']['theme'] ?? null,
             defaultLocale: $this->config['defaults']['locale'] ?? null,
+            defaultFormat: $this->config['defaults']['format'] ?? null,
         );
     }
 

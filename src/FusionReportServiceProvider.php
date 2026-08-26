@@ -19,10 +19,15 @@ class FusionReportServiceProvider extends ServiceProvider
 
         $this->app->bind(WebhookHandler::class, FusionReportWebhookHandler::class);
 
+        $this->app->singleton(
+            FusionReportHttp::class,
+            fn($app) => new FusionReportHttp($app->make('config')->get('fusion-report')),
+        );
+
         $this->app->singleton(FusionReportClient::class, function ($app) {
             $config = $app->make('config')->get('fusion-report');
 
-            $client = new FusionReportClient(new FusionReportHttp($config), $config);
+            $client = new FusionReportClient($app->make(FusionReportHttp::class), $config);
 
             foreach ($config['reports'] ?? [] as $name => $definition) {
                 $client->register($name, $definition);

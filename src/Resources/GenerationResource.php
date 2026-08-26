@@ -35,11 +35,13 @@ class GenerationResource implements \JsonSerializable
         return $this->data['status'] ?? 'unknown';
     }
 
+    /** Sempre 0: `progress_percent` está em `$hidden` no servidor. */
     public function progressPercent(): int
     {
         return $this->data['progress_percent'] ?? 0;
     }
 
+    /** Sempre null: `error_message` está em `$hidden` no servidor. */
     public function errorMessage(): ?string
     {
         return $this->data['error_message'] ?? null;
@@ -106,13 +108,26 @@ class GenerationResource implements \JsonSerializable
         return $this->currentStatus() === 'cancelled';
     }
 
-    /** Re-queries the server and returns the updated status string. */
+    /**
+     * Reconsulta o servidor e devolve o status atualizado.
+     *
+     * ATENÇÃO: depende de `get()` — indisponível via `X-API-KEY`. Ver o
+     * docblock de `get()`.
+     */
     public function status(): string
     {
         return $this->get()->currentStatus();
     }
 
-    /** Re-queries the server and returns a fresh GenerationResource. */
+    /**
+     * Reconsulta o servidor e atualiza esta instância (não cria uma nova).
+     *
+     * ATENÇÃO: `GET /api/v1/generations/{id}` é restrito ao dashboard
+     * (Sanctum). Autenticado por `X-API-KEY`, o servidor responde 401 e o
+     * package converte em `FusionReportException`. Não há polling na
+     * integração por API key — o resultado da geração assíncrona chega pelo
+     * webhook (`onWebhookReceived()`).
+     */
     public function get(): static
     {
         $this->data = $this->http->get("/api/v1/generations/{$this->id()}");
@@ -124,6 +139,11 @@ class GenerationResource implements \JsonSerializable
         return $this;
     }
 
+    /**
+     * ATENÇÃO: `DELETE /api/v1/generations/{id}` é restrito ao dashboard
+     * (Sanctum). Autenticado por `X-API-KEY`, o servidor responde 401 e o
+     * package converte em `FusionReportException`.
+     */
     public function cancel(): void
     {
         $this->http->delete("/api/v1/generations/{$this->id()}");
@@ -132,6 +152,28 @@ class GenerationResource implements \JsonSerializable
             FusionReportGeneration::where('generation_uuid', $this->id())
                 ->update(['status' => 'cancelled']);
         }
+    }
+
+    /**
+     * Re-exporta esta geração para outro formato, a partir do .frp intermediário.
+     *
+     * Diferente de `FileResource::export()`, que parte de um arquivo específico,
+     * aqui o servidor localiza sozinho o .frp da geração. Retorna uma geração
+     * nova — a original permanece intacta.
+     *
+     * Formatos aceitos: pdf, xlsx, xls, docx, odt, csv, html ('frp' não, já que
+     * é o próprio intermediário).
+     *
+     * @throws \RiseTechApps\FusionReport\Exceptions\ReportNotFoundException
+     *         quando a geração não tem .frp disponível ou ele já expirou
+     */
+    public function export(string $format): static
+    {
+        $response = $this->http->post("/api/v1/generations/{$this->id()}/export", [
+            'format' => $format,
+        ]);
+
+        return new static($response, $this->http);
     }
 
     /** @return Collection<int, FileResource> */

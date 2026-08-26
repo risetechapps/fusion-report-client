@@ -2,6 +2,7 @@
 
 namespace RiseTechApps\FusionReport\Managers;
 
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Collection;
 use RiseTechApps\FusionReport\Http\FusionReportHttp;
 use RiseTechApps\FusionReport\Resources\GenerationResource;
@@ -110,6 +111,21 @@ class TemplateManager
         return new TemplateResource($response);
     }
 
+    /**
+     * Baixa o .jrxml registrado no servidor.
+     *
+     * A resposta é o XML cru (`application/xml`), não o envelope JSON do resto
+     * da API — use `->body()` para o conteúdo. Útil para comparar o template
+     * publicado com o local antes de reenviar.
+     *
+     * @throws \RiseTechApps\FusionReport\Exceptions\ReportNotFoundException
+     *         quando o template não existe ou o arquivo sumiu do storage
+     */
+    public function downloadJrxml(string $id): Response
+    {
+        return $this->http->download("/api/v1/reports/{$id}/jrxml");
+    }
+
     public function delete(string $id): void
     {
         $this->http->delete("/api/v1/reports/{$id}");
@@ -120,7 +136,13 @@ class TemplateManager
         $this->http->delete("/api/v1/reports/name/{$name}", ['theme' => $theme]);
     }
 
-    /** @return Collection<int, GenerationResource> */
+    /**
+     * ATENÇÃO: rota restrita ao dashboard (Sanctum). Autenticado por `X-API-KEY`
+     * o servidor responde 401, convertido em `FusionReportException`. Para
+     * histórico use a tabela local `fusion_report_generations`.
+     *
+     * @return Collection<int, GenerationResource>
+     */
     public function generations(string $id): Collection
     {
         $response = $this->http->get("/api/v1/reports/{$id}/generations");
@@ -129,7 +151,13 @@ class TemplateManager
             ->map(fn(array $item) => new GenerationResource($item, $this->http));
     }
 
-    /** @return Collection<int, GenerationResource> */
+    /**
+     * ATENÇÃO: rota restrita ao dashboard (Sanctum). Autenticado por `X-API-KEY`
+     * o servidor responde 401, convertido em `FusionReportException`. Para
+     * histórico use a tabela local `fusion_report_generations`.
+     *
+     * @return Collection<int, GenerationResource>
+     */
     public function generationsByName(string $name): Collection
     {
         $response = $this->http->get("/api/v1/reports/name/{$name}/generations");

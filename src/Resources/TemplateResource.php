@@ -31,6 +31,7 @@ class TemplateResource implements \JsonSerializable
         return $this->data['original_filename'] ?? '';
     }
 
+    /** Sempre '': `file_path` está em `$hidden` no servidor. */
     public function filePath(): string
     {
         return $this->data['file_path'] ?? '';
@@ -46,6 +47,7 @@ class TemplateResource implements \JsonSerializable
         return $this->data['updated_at'] ?? null;
     }
 
+    /** Sempre null: `resources_path` está em `$hidden` no servidor. Use hasResources(). */
     public function resourcesPath(): ?string
     {
         return $this->data['resources_path'] ?? null;

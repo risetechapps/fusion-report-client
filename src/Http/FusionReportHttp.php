@@ -4,12 +4,16 @@ namespace RiseTechApps\FusionReport\Http;
 
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use RiseTechApps\FusionReport\Exceptions\AuthenticationException;
+use RiseTechApps\FusionReport\Exceptions\AuthorizationException;
 use RiseTechApps\FusionReport\Exceptions\FusionReportException;
+use RiseTechApps\FusionReport\Exceptions\RateLimitException;
 use RiseTechApps\FusionReport\Exceptions\ReportNotFoundException;
 
 class FusionReportHttp
 {
-    public const BASE_URL = 'https://fusionreport.app.br';
+//    public const BASE_URL = 'https://fusionreport.app.br';
+    public const BASE_URL = 'https://report.risetech.dev.br';
 
     public function __construct(private readonly array $config) {}
 
@@ -85,7 +89,7 @@ class FusionReportHttp
     {
         if ($response->status() === 422) {
             $errors = $response->json('errors') ?? [];
-            $message = $response->json('message') ?? 'Validation failed.';
+            $message = $this->messageFrom($response) ?? 'Validation failed.';
 
             if ($errors) {
                 $details = collect($errors)->map(fn($msgs) => implode(' ', $msgs))->implode(' ');
@@ -95,22 +99,56 @@ class FusionReportHttp
             throw new FusionReportException($message);
         }
 
+        if ($response->status() === 401) {
+            throw new AuthenticationException(
+                $this->messageFrom($response) ?? 'Unauthenticated. Check the configured api_key.'
+            );
+        }
+
+        if ($response->status() === 403) {
+            throw new AuthorizationException(
+                $this->messageFrom($response) ?? 'This resource belongs to another account.'
+            );
+        }
+
+        if ($response->status() === 429) {
+            $retryAfter = $response->header('Retry-After');
+
+            throw new RateLimitException(
+                $this->messageFrom($response) ?? 'Request limit reached for the current plan.',
+                is_numeric($retryAfter) ? (int) $retryAfter : null,
+            );
+        }
+
         if ($response->status() === 404) {
             throw new ReportNotFoundException(
-                $response->json('message') ?? 'Resource not found.'
+                $this->messageFrom($response) ?? 'Resource not found.'
             );
         }
 
         if ($response->status() === 410) {
             throw new ReportNotFoundException(
-                $response->json('message') ?? 'Resource not found or expired.'
+                $this->messageFrom($response) ?? 'Resource not found or expired.'
             );
         }
 
         if ($response->failed()) {
             throw new FusionReportException(
-                $response->json('message') ?? "Fusion Report Server error [{$response->status()}]."
+                $this->messageFrom($response) ?? "Fusion Report Server error [{$response->status()}]."
             );
         }
+    }
+
+    /**
+     * Mensagem de erro da resposta.
+     *
+     * O envelope padrão do servidor usa `message`, mas o middleware de cota
+     * responde `{"error": "..."}` — sem ler as duas, o motivo do 429 se perdia.
+     */
+    private function messageFrom(Response $response): ?string
+    {
+        $message = $response->json('message') ?? $response->json('error');
+
+        return is_string($message) && $message !== '' ? $message : null;
     }
 }
