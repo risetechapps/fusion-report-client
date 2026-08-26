@@ -53,7 +53,21 @@ abstract class ReportDefinition
         return auth()->user();
     }
 
+    /**
+     * Executado após geração SÍNCRONA (`generate()`), com o relatório pronto.
+     *
+     * NÃO é chamado por `generateAsync()`: ali o servidor apenas enfileirou o
+     * job, `$generation->files()` viria vazio e não há o que entregar. O
+     * equivalente assíncrono é `onWebhookReceived()`.
+     *
+     * Para reagir ao enfileiramento em si, escute o evento
+     * `ReportGenerationStarted`, disparado nos dois modos.
+     */
     public function onGenerated(GenerationResource $generation, array $context = []): void {}
 
+    /**
+     * Executado quando o callback da geração assíncrona chega — é aqui que o
+     * resultado de `generateAsync()` aparece.
+     */
     public function onWebhookReceived(WebhookPayload $payload, array $context = []): void {}
 }

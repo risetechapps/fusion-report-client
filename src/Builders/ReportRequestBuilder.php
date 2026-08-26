@@ -3,7 +3,12 @@
 namespace RiseTechApps\FusionReport\Builders;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Event;
 use RiseTechApps\FusionReport\Datasources\Contracts\Datasource;
+use RiseTechApps\FusionReport\Events\ReportGenerationCompleted;
+use RiseTechApps\FusionReport\Events\ReportGenerationFailed;
+use RiseTechApps\FusionReport\Events\ReportGenerationStarted;
+use RiseTechApps\FusionReport\Exceptions\FusionReportException;
 use RiseTechApps\FusionReport\Datasources\NoDatasource;
 use RiseTechApps\FusionReport\Definitions\ReportProtection;
 use RiseTechApps\FusionReport\Http\FusionReportHttp;
@@ -34,6 +39,7 @@ class ReportRequestBuilder
         private readonly ?string $defaultWebhook = null,
         private readonly ?string $defaultTheme = null,
         private readonly ?string $defaultLocale = null,
+        private readonly string|array|null $defaultFormat = null,
     ) {
         $this->datasource = NoDatasource::make();
     }
@@ -47,7 +53,9 @@ class ReportRequestBuilder
 
     public function format(string|array $format): static
     {
-        $this->formats = array_merge($this->formats, (array) $format);
+        $this->formats = array_values(array_unique(
+            array_merge($this->formats, static::normalizeFormats($format))
+        ));
 
         return $this;
     }
@@ -122,6 +130,12 @@ class ReportRequestBuilder
         return $this;
     }
 
+    /**
+     * Callback executado ao fim de `generate()`.
+     *
+     * Só vale para o modo síncrono — `generateAsync()` não o executa, porque
+     * naquele ponto o relatório ainda não existe. Ver `ReportDefinition::onGenerated()`.
+     */
     public function setAfterGenerate(\Closure $callback): static
     {
         $this->afterGenerate = $callback;
@@ -140,12 +154,20 @@ class ReportRequestBuilder
             $this->http,
         );
 
+        $context = $this->persistedContext();
+
         if (config('fusion-report.log_generations', true)) {
-            FusionReportGeneration::createFromGeneration($generation, $this->owner, $this->persistedContext());
+            FusionReportGeneration::createFromGeneration($generation, $this->owner, $context);
         }
 
+        Event::dispatch(new ReportGenerationStarted($generation, $context, $this->owner));
+
+        Event::dispatch($generation->isFailed()
+            ? new ReportGenerationFailed($generation, $context, $this->owner, $generation->errorMessage())
+            : new ReportGenerationCompleted($generation, $context, $this->owner));
+
         if ($this->afterGenerate) {
-            ($this->afterGenerate)($generation, $this->persistedContext());
+            ($this->afterGenerate)($generation, $context);
         }
 
         return $generation;
@@ -168,9 +190,13 @@ class ReportRequestBuilder
 
         $generation = new GenerationResource($response, $this->http);
 
+        $context = $this->persistedContext();
+
         if (config('fusion-report.log_generations', true)) {
-            FusionReportGeneration::createFromGeneration($generation, $this->owner, $this->persistedContext());
+            FusionReportGeneration::createFromGeneration($generation, $this->owner, $context);
         }
+
+        Event::dispatch(new ReportGenerationStarted($generation, $context, $this->owner));
 
         return $generation;
     }
@@ -178,6 +204,33 @@ class ReportRequestBuilder
     private function effectiveLocale(): ?string
     {
         return $this->locale ?? $this->defaultLocale;
+    }
+
+    /**
+     * Formatos da geração, caindo no default do config quando nenhum foi
+     * informado. O servidor exige `format` obrigatório — sem o default, toda
+     * geração sem `->format()` explícito voltava 422.
+     */
+    private function effectiveFormats(): array
+    {
+        return $this->formats ?: static::normalizeFormats($this->defaultFormat);
+    }
+
+    /**
+     * Aceita 'pdf', 'pdf,xlsx' ou ['pdf', 'xlsx'], normalizando para a lista
+     * minúscula que o servidor valida.
+     */
+    private static function normalizeFormats(string|array|null $format): array
+    {
+        if ($format === null) {
+            return [];
+        }
+
+        $items = is_string($format) ? explode(',', $format) : $format;
+
+        $items = array_map(fn($item) => strtolower(trim((string) $item)), $items);
+
+        return array_values(array_unique(array_filter($items, fn($item) => $item !== '')));
     }
 
     /**
@@ -215,7 +268,7 @@ class ReportRequestBuilder
         return array_filter([
             'name'              => $this->templateId ? null : $this->template,
             'theme'             => $this->templateId ? null : ($this->theme ?? $this->defaultTheme),
-            'format'            => $this->formats ?: null,
+            'format'            => $this->effectiveFormats() ?: null,
             'params'            => $this->serializeParams(),
             'datasource_type'   => $datasourceType !== 'none' ? $datasourceType : null,
             'datasource_config' => $datasourceConfig ?: null,
@@ -236,9 +289,34 @@ class ReportRequestBuilder
         }
 
         return array_map(
-            fn($key, $value) => "{$key}={$value}",
+            fn($key, $value) => "{$key}=" . $this->stringifyParam($key, $value),
             array_keys($merged),
             $merged,
         );
+    }
+
+    /**
+     * Converte o valor de um parâmetro para a forma `key=value` que o servidor
+     * espera.
+     *
+     * A interpolação direta quebrava com array ("Array to string conversion")
+     * e produzia `KEY=` para `false`, indistinguível de string vazia.
+     *
+     * @throws FusionReportException quando o valor não tem representação textual
+     */
+    private function stringifyParam(string $key, mixed $value): string
+    {
+        return match (true) {
+            $value === null                     => '',
+            is_bool($value)                     => $value ? 'true' : 'false',
+            is_scalar($value)                   => (string) $value,
+            $value instanceof \BackedEnum       => (string) $value->value,
+            $value instanceof \DateTimeInterface => $value->format(DATE_ATOM),
+            $value instanceof \Stringable       => (string) $value,
+            is_array($value)                    => json_encode($value, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+            default                             => throw new FusionReportException(
+                sprintf('Report param [%s] of type %s cannot be serialized.', $key, get_debug_type($value)),
+            ),
+        };
     }
 }

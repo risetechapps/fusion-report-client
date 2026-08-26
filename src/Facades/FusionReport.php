@@ -34,13 +34,13 @@ class FusionReport extends Facade
      */
     public static function routes(array $options = []): void
     {
+        // O middleware informado pelo caller vence; 'auth:sanctum' é só o
+        // padrão de quem não informa nada. O group já aplica $options, então a
+        // rota interna não repete o middleware.
+        $options = array_merge(['middleware' => ['auth:sanctum']], $options);
+
         Route::group($options, function () {
-
-            $middlewares = $options['middleware'] ?? [];
-
-            $middlewares = ['auth:sanctum'];
-
-            Route::middleware($middlewares)->post('/reports/generate', GenerateController::class)
+            Route::post('/reports/generate', GenerateController::class)
                 ->name('fusion-report.generate');
         });
     }

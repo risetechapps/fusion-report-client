@@ -48,17 +48,21 @@ class FusionReportGeneration extends Model
                 ->toArray()
             : null;
 
-        return static::create([
-            'generation_uuid' => $generation->id(),
-            'frp_uuid'        => $generation->frpId(),
-            'name'            => $generation->templateName(),
-            'formats'         => $generation->requestedFormats(),
-            'download_urls'   => $downloadUrls,
-            'status'          => $generation->currentStatus(),
-            'context'         => $context ?: null,
-            'loggable_type'   => $owner ? $owner::class : null,
-            'loggable_id'     => $owner?->getKey(),
-        ]);
+        // updateOrCreate e não create: `generation_uuid` é unique, então um
+        // retry da requisição ou um webhook reentregue estourava a constraint.
+        return static::updateOrCreate(
+            ['generation_uuid' => $generation->id()],
+            [
+                'frp_uuid'      => $generation->frpId(),
+                'name'          => $generation->templateName(),
+                'formats'       => $generation->requestedFormats(),
+                'download_urls' => $downloadUrls,
+                'status'        => $generation->currentStatus(),
+                'context'       => $context ?: null,
+                'loggable_type' => $owner ? $owner::class : null,
+                'loggable_id'   => $owner?->getKey(),
+            ],
+        );
     }
 
     public static function updateFromGeneration(GenerationResource $generation): void
