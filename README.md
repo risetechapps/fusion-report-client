@@ -39,6 +39,16 @@ return [
         'url'    => env('FUSION_REPORT_WEBHOOK_URL'),
         'secret' => env('FUSION_REPORT_WEBHOOK_SECRET'),
 
+        // Exige assinatura HMAC valida. Com true (padrao) e 'secret' vazio,
+        // a rota recusa a requisicao em vez de aceitar payload nao assinado.
+        // So desligue em desenvolvimento local.
+        'require_signature' => env('FUSION_REPORT_WEBHOOK_REQUIRE_SIGNATURE', true),
+
+        // Processa o callback numa fila em vez de dentro da requisicao.
+        // false = inline; true = fila padrao; string = fila nomeada.
+        // Exige worker rodando. Ver "Processamento em fila".
+        'queue' => env('FUSION_REPORT_WEBHOOK_QUEUE', false),
+
         // Path e middleware da rota que recebe o callback do servidor.
         // O package é agnóstico de contexto: a app hospedeira injeta aqui
         // o middleware que estabelece o contexto necessário (tenancy, auth,
@@ -54,6 +64,11 @@ return [
 
         // Locale padrão aplicado quando a geração não define um via ->locale().
         'locale' => env('FUSION_REPORT_LOCALE', 'pt_BR'),
+
+        // Formato(s) usados quando a geracao nao define nenhum via ->format().
+        // O servidor exige 'format': sem este default, geracao sem ->format()
+        // volta 422. Aceita 'pdf', 'pdf,xlsx' ou ['pdf', 'xlsx'].
+        'format' => env('FUSION_REPORT_FORMAT', 'pdf'),
 
         'params' => [
             // Parâmetros enviados em toda geração automaticamente
@@ -74,8 +89,10 @@ return [
 FUSION_REPORT_API_KEY=sua_api_key
 FUSION_REPORT_THEME=default
 FUSION_REPORT_LOCALE=pt_BR
+FUSION_REPORT_FORMAT=pdf
 FUSION_REPORT_WEBHOOK_URL=https://seu-projeto.com/fusion/webhook
-FUSION_REPORT_WEBHOOK_SECRET=seu_secret
+FUSION_REPORT_WEBHOOK_SECRET=seu_secret   # obrigatorio: sem ele o webhook responde 503
+FUSION_REPORT_WEBHOOK_QUEUE=false
 ```
 
 ---
@@ -83,6 +100,10 @@ FUSION_REPORT_WEBHOOK_SECRET=seu_secret
 ## Templates JRXML
 
 ### Listar
+
+Retorna **todos** os templates registrados. O endpoint do servidor é paginado
+(`per_page` padrão 50, máximo 100), mas `list()` percorre as páginas
+internamente — não é preciso paginar na aplicação.
 
 ```php
 $templates = FusionReport::templates()->list();
@@ -147,6 +168,24 @@ $template = FusionReport::templates()->updateByName(
 );
 ```
 
+### Baixar o .jrxml registrado
+
+Devolve o XML cru (`application/xml`), não o envelope JSON do resto da API.
+Útil para conferir o que está publicado antes de reenviar.
+
+```php
+$response = FusionReport::templates()->downloadJrxml('uuid-do-template');
+
+$xml = $response->body();
+
+// Comparar com o arquivo local antes de sincronizar
+$local = file_get_contents(resource_path('reports/client_all/default.jrxml'));
+
+if (trim($xml) !== trim($local)) {
+    $this->info('Template divergente do servidor.');
+}
+```
+
 ### Excluir por ID
 
 ```php
@@ -161,6 +200,11 @@ FusionReport::templates()->deleteByName('client_all', 'blue'); // tema específi
 ```
 
 ### Histórico de gerações
+
+> **Indisponível via `X-API-KEY`** — ambas as rotas são restritas ao dashboard
+> (Sanctum) e retornam 401. Para histórico na integração por API key, use a
+> tabela local `fusion_report_generations`. Ver
+> *[Métodos indisponíveis via X-API-KEY](#métodos-indisponíveis-via-x-api-key)*.
 
 ```php
 // Por ID do template
@@ -245,7 +289,9 @@ class ClientesAllReport extends ReportDefinition
 
     public function onGenerated(GenerationResource $generation, array $context = []): void
     {
-        // Executado automaticamente após geração síncrona
+        // Só no modo SÍNCRONO (generate()). generateAsync() não chama este hook:
+        // ali o servidor apenas enfileirou o job e files() viria vazio.
+        // O equivalente assíncrono é onWebhookReceived(), logo abaixo.
         if ($context['send_email'] ?? false) {
             Mail::to($context['email'])->send(new ReportReadyMail($generation));
         }
@@ -389,13 +435,66 @@ $id = $generation->id(); // salve para consultar depois
 $generation = FusionReport::make('client_all')
     ->format('pdf')
     ->generateAsync(webhook: 'https://outro-endpoint.com/webhook');
+```
 
-// Acompanhar status
-$generation = FusionReport::generation($id)->get();
-$generation->currentStatus();   // pending → processing → completed
-$generation->progressPercent();
-$generation->isFailed();
-$generation->errorMessage();
+> **O resultado da geração assíncrona chega pelo webhook, não por polling.**
+> `FusionReport::generation($id)->get()` bate em `GET /api/v1/generations/{id}`,
+> que o servidor restringe ao dashboard (Sanctum). Autenticado por `X-API-KEY`,
+> retorna 401 → `FusionReportException`. Ver
+> *[Métodos indisponíveis via X-API-KEY](#métodos-indisponíveis-via-x-api-key)*.
+>
+> Configure `webhook.url` e implemente `onWebhookReceived()` na sua
+> `ReportDefinition` — é o caminho suportado para saber que o relatório ficou pronto.
+
+### Formatos
+
+O servidor exige pelo menos um formato em toda geração. Quando você não chama
+`->format()`, vale o `defaults.format` do config (`pdf` de fábrica):
+
+```php
+// Usa defaults.format
+FusionReport::make('client_all')->generate();
+
+// Sobrescreve o default — não acumula com ele
+FusionReport::make('client_all')->format('xlsx')->generate();
+
+// Múltiplos formatos, nas três formas aceitas
+->format(['pdf', 'xlsx'])
+->format('pdf,xlsx')
+->format('pdf')->format('xlsx')
+```
+
+Entrada é normalizada: espaços são removidos, maiúsculas viram minúsculas
+(`'PDF'` → `'pdf'`) e duplicatas caem fora.
+
+Válidos: `pdf`, `xlsx`, `xls`, `docx`, `odt`, `csv`, `html`, `frp`.
+
+> Definir `defaults.format` como `null` ou `''` volta ao comportamento anterior:
+> o payload omite `format` e o servidor responde 422 se a geração não informar um.
+
+### Parâmetros
+
+O servidor recebe `params` como lista de strings `CHAVE=valor`. A conversão é
+feita pelo package:
+
+| Tipo PHP | Vira |
+|---|---|
+| `string`, `int`, `float` | o próprio valor |
+| `bool` | `true` / `false` |
+| `null` | string vazia |
+| `array` | JSON (`["a","b"]`, `{"x":1}`) |
+| `BackedEnum` | o `value` do case |
+| `DateTimeInterface` | ISO-8601 (`DATE_ATOM`) |
+| `Stringable` | `__toString()` |
+| qualquer outro | `FusionReportException` |
+
+```php
+->params([
+    'ANO'     => 2026,
+    'ATIVO'   => true,               // ATIVO=true
+    'PERIODO' => new DateTimeImmutable('2026-01-01'),
+    'TAGS'    => ['a', 'b'],         // TAGS=["a","b"]
+])
 ```
 
 ### Geração pelo builder (sem registry)
@@ -509,15 +608,101 @@ $novaGeracao = $file->export('xlsx');
 $novaGeracao = FusionReport::file($frpId)->export('pdf');
 ```
 
+### Re-exportar uma geração inteira
+
+Quando você tem o ID da geração e não o do arquivo, o servidor localiza o `.frp`
+sozinho:
+
+```php
+$nova = FusionReport::generation($generationId)->export('xlsx');
+
+$nova->id();       // geração nova; a original continua intacta
+$nova->files();
+```
+
+Formatos aceitos: `pdf`, `xlsx`, `xls`, `docx`, `odt`, `csv`, `html`. O `frp` não
+entra na lista — é o próprio intermediário.
+
+Lança `ReportNotFoundException` quando a geração não tem `.frp` disponível ou ele
+já expirou.
+
 ---
 
 ## Webhook
 
 O package registra automaticamente a rota do callback (default `POST /fusion/webhook`). Quando a geração assíncrona termina, o servidor faz POST nessa rota e o package:
 
-1. Verifica a assinatura HMAC (se `webhook.secret` estiver configurado).
+1. Verifica a assinatura HMAC (obrigatória — ver *Verificação de assinatura*).
 2. Atualiza o registro em `fusion_report_generations` (status + URLs).
-3. Chama `onWebhookReceived()` da `ReportDefinition` cujo `name()` bate com o `template_name` do payload.
+3. Descarta reentregas: se o status gravado já é o do payload, para aqui.
+4. Dispara `ReportGenerationCompleted` / `ReportGenerationFailed`.
+5. Chama `onWebhookReceived()` da `ReportDefinition` cujo `name()` bate com o `template_name` do payload.
+
+> **Entrega duplicada.** O servidor reentrega o callback até 3 vezes (backoff
+> 10s/60s/180s) sempre que não recebe resposta — e o timeout dele é de 15s,
+> contados enquanto o seu handler ainda está rodando. Um `onWebhookReceived()`
+> lento aumenta a própria chance de ser reexecutado.
+>
+> O passo 3 protege contra isso comparando o status já gravado com o do payload.
+> Ainda assim, mantenha o hook leve: prefira `dispatch()` de um job a fazer o
+> trabalho pesado inline.
+
+### Processamento em fila (recomendado)
+
+Por padrão o callback é processado **dentro da requisição**: o `200` só sai
+depois do update, dos eventos e do `onWebhookReceived()`. Como o servidor
+concede 15s e reentrega até 3 vezes, um hook que manda e-mail ou sobe arquivo
+passa desse limite — o trabalho é feito, mas o servidor registra
+`Client webhook gave up after all attempts` e reentrega. O log passa a mentir
+sobre o que aconteceu.
+
+Ligando a fila, a assinatura é verificada, o payload é enfileirado e o `200` sai
+em milissegundos:
+
+```env
+FUSION_REPORT_WEBHOOK_QUEUE=true       # fila padrão
+FUSION_REPORT_WEBHOOK_QUEUE=webhooks   # fila nomeada
+```
+
+O job é o `ProcessFusionReportWebhook` (`tries = 3`, backoff 10s/60s/180s).
+
+> **Exige worker rodando.** Sem `queue:work` consumindo a fila, os callbacks
+> ficam parados e o fluxo assíncrono não completa. Por isso o padrão é `false`.
+
+**Contexto (tenancy, auth).** O job é despachado de dentro da requisição, onde o
+middleware de `webhook.middleware` já estabeleceu o contexto. Pacotes de tenancy
+com suporte a fila propagam esse contexto automaticamente. Se o seu não faz
+isso, mantenha `queue => false` ou trate a propagação no seu próprio
+`WebhookHandler`.
+
+Validação de payload malformado continua acontecendo **antes** do
+enfileiramento, então o `422` segue valendo — depois do `200` não haveria como
+avisar o servidor.
+
+### Deduplicação
+
+A deduplicação usa dois guards, e basta um acusar entrega anterior:
+
+| Guard | Força | Limite |
+|---|---|---|
+| Status já gravado na linha | Durável, sobrevive a flush de cache | Só existe com `log_generations` ligado |
+| `Cache::add()` da chave `fusion-report:webhook:{uuid}:{status}` | Atômico — fecha a corrida de entregas simultâneas | Perde efeito se o cache for limpo, ou com driver `null` |
+
+O TTL do cache sai de `webhook.deduplication_ttl` (minutos, padrão 1440). O
+servidor reentrega no máximo por ~4 minutos, então 24h cobre com folga.
+
+> **Com `log_generations = false`** não existe registro, e com ele some o
+> `$context` — que chega sempre vazio em `onWebhookReceived()` e nos eventos —
+> e o `$owner`, que vem `null`. A deduplicação passa a depender só do cache. Os
+> hooks continuam disparando; antes desta versão, o callback virava no-op
+> silencioso.
+>
+> Se você usa `->context([...])` ou `->for($model)`, mantenha o log ligado.
+
+Registro ausente **com** o log ligado é tratado como anomalia, não como
+duplicata: o package registra `Log::warning` e não dispara nada. Em apps
+multi-tenant isso normalmente significa que o middleware de `webhook.middleware`
+não inicializou o tenant antes do controller — a consulta caiu no banco errado.
 
 ### 1. Reagindo ao callback — `onWebhookReceived()` (recomendado)
 
@@ -581,7 +766,32 @@ foreach ($payload->downloads() as $download) {
 
 ### Verificação de assinatura
 
-A verificação HMAC é feita automaticamente pelo package quando `webhook.secret` está configurado. Para uso manual:
+A verificação HMAC é feita automaticamente pelo package.
+
+> **`webhook.secret` é obrigatório.** Sem ele a rota responde **503** e não
+> processa nada — a alternativa seria aceitar payload não assinado, permitindo
+> que qualquer POST alterasse status e URLs de download das suas gerações e
+> disparasse os eventos da aplicação.
+>
+> Para desenvolvimento local sem segredo, e só para isso:
+>
+> ```env
+> FUSION_REPORT_WEBHOOK_REQUIRE_SIGNATURE=false
+> ```
+>
+> Com essa flag o package registra um `Log::warning` a cada callback aceito sem
+> verificação.
+
+Respostas da rota de webhook:
+
+| Situação | HTTP |
+|---|---|
+| Processado | 200 |
+| Assinatura ausente ou inválida | 401 |
+| Payload sem `id` ou `status` | 422 (o servidor para de retentar) |
+| `webhook.secret` não configurado | 503 |
+
+Para uso manual:
 
 ```php
 use RiseTechApps\FusionReport\Webhook\WebhookPayload;
@@ -598,6 +808,11 @@ try {
 
 ## Monitoramento Jasper
 
+> **Indisponível via `X-API-KEY`.** As cinco rotas `/api/v1/jasper/*` são
+> exclusivas do dashboard (Sanctum) — expõem estado global do servidor Java, que
+> não é escopado por cliente. Chamadas autenticadas por API key retornam 401.
+> Os métodos seguem no package para quem autentica de outra forma.
+
 ```php
 FusionReport::jasper()->formats();      // Formatos suportados
 FusionReport::jasper()->status();       // Status geral
@@ -610,51 +825,247 @@ FusionReport::jasper()->fontsSync();    // Sincronizar fontes no servidor Java
 
 ## Tratamento de Erros
 
+Todas as exceptions do package herdam de `FusionReportException`, então um único
+`catch` continua capturando tudo. As específicas existem para quem precisa
+distinguir o caso.
+
 ```php
+use RiseTechApps\FusionReport\Exceptions\AuthenticationException;
+use RiseTechApps\FusionReport\Exceptions\AuthorizationException;
 use RiseTechApps\FusionReport\Exceptions\FusionReportException;
+use RiseTechApps\FusionReport\Exceptions\RateLimitException;
 use RiseTechApps\FusionReport\Exceptions\ReportNotFoundException;
 
 try {
     $generation = FusionReport::make('client_all')->format('pdf')->generate();
+} catch (RateLimitException $e) {
+    // Cota do plano esgotada — reenfileire para depois
+    $wait = $e->retryAfter() ?? 60;   // segundos, quando o servidor informa
+} catch (AuthenticationException $e) {
+    // api_key ausente/inválida, ou rota restrita ao dashboard
+} catch (AuthorizationException $e) {
+    // Recurso de outra conta
 } catch (ReportNotFoundException $e) {
     // Template não encontrado (404 ou 410)
 } catch (FusionReportException $e) {
-    // Erro de validação (422) ou erro interno do servidor
-    // $e->getMessage() contém os detalhes
+    // Validação (422) ou erro interno do servidor
 }
 ```
 
+> **Falha de conexão fica de fora.** Timeout e rede indisponível lançam
+> `Illuminate\Http\Client\ConnectionException`, que **não** herda de
+> `FusionReportException` — não há resposta HTTP para o package traduzir.
+> Capture separadamente quando isso importar:
+>
+> ```php
+> use Illuminate\Http\Client\ConnectionException;
+>
+> } catch (ConnectionException $e) {
+>     // O servidor pode ter concluído a geração mesmo assim — ver
+>     // "Limitações conhecidas".
+> }
+> ```
+
 | HTTP | Situação | Exception |
 |---|---|---|
+| 401 | Credencial ausente/inválida, ou rota só de dashboard | `AuthenticationException` |
+| 403 | Recurso pertence a outra conta | `AuthorizationException` |
 | 422 | Campo obrigatório ausente ou arquivo inválido | `FusionReportException` |
+| 429 | Cota de requisições do plano esgotada | `RateLimitException` |
 | 404 | ID não encontrado (route model binding) | `ReportNotFoundException` |
 | 410 | Nome não encontrado, conflito ou erro interno | `ReportNotFoundException` / `FusionReportException` |
 
 ---
 
+## Eventos
+
+O package dispara eventos em todo ciclo de geração. Use quando quiser reagir sem
+ser dono da `ReportDefinition` — o hook `onGenerated()`/`onWebhookReceived()`
+continua funcionando e os dois convivem.
+
+```php
+use RiseTechApps\FusionReport\Events\ReportGenerationStarted;
+use RiseTechApps\FusionReport\Events\ReportGenerationCompleted;
+use RiseTechApps\FusionReport\Events\ReportGenerationFailed;
+```
+
+| Evento | Quando |
+|---|---|
+| `ReportGenerationStarted` | O servidor aceitou a requisição (síncrona **e** assíncrona) |
+| `ReportGenerationCompleted` | Concluída — na síncrona, pela resposta; na assíncrona, pelo webhook |
+| `ReportGenerationFailed` | Falhou, pelos mesmos dois caminhos |
+
+Todos expõem as mesmas propriedades públicas:
+
+```php
+class MyListener
+{
+    public function handle(ReportGenerationCompleted $event): void
+    {
+        $event->generation;   // GenerationResource
+        $event->context;      // array passado via ->context()
+        $event->owner;        // ?Model — de ->for() / ReportDefinition::owner()
+
+        foreach ($event->generation->files() as $file) {
+            Storage::put("relatorios/{$file->filename()}", $file->download()->body());
+        }
+    }
+}
+```
+
+`ReportGenerationFailed` tem ainda `$event->error`.
+
+> Na geração **síncrona** o `Started` é seguido imediatamente por
+> `Completed`/`Failed`, no mesmo ciclo — a resposta já vem finalizada. Na
+> assíncrona só o `Started` sai na hora; o desfecho chega pelo webhook.
+>
+> `$event->error` costuma vir `null` no caminho assíncrono: o servidor mantém
+> `error_message` em `$hidden`. Ver *[Campos sempre vazios](#campos-sempre-vazios)*.
+
+---
+
+## Métodos indisponíveis via X-API-KEY
+
+O client autentica exclusivamente por `X-API-KEY`. Parte das rotas do servidor é
+restrita ao dashboard e exige Bearer token do Sanctum — chamá-las com API key
+retorna **401**, que o package converte em `FusionReportException`.
+
+Os métodos abaixo continuam existindo (podem ser usados por quem autentica de
+outra forma), mas **não funcionam na integração por API key**:
+
+| Método | Rota | Alternativa |
+|---|---|---|
+| `generation($id)->get()` | `GET /api/v1/generations/{id}` | webhook (`onWebhookReceived()`) |
+| `generation($id)->status()` | `GET /api/v1/generations/{id}` | webhook |
+| `generation($id)->cancel()` | `DELETE /api/v1/generations/{id}` | — |
+| `templates()->generations($id)` | `GET /api/v1/reports/{id}/generations` | tabela `fusion_report_generations` |
+| `templates()->generationsByName($n)` | `GET /api/v1/reports/name/{n}/generations` | tabela `fusion_report_generations` |
+| `jasper()->formats()` | `GET /api/v1/jasper/formats` | — |
+| `jasper()->status()` | `GET /api/v1/jasper/status` | — |
+| `jasper()->jobs()` | `GET /api/v1/jasper/jobs` | — |
+| `jasper()->fontsStatus()` | `GET /api/v1/jasper/fonts/status` | — |
+| `jasper()->fontsSync()` | `POST /api/v1/jasper/fonts/sync` | — |
+
+Para histórico de gerações, use o log local do próprio package
+(`fusion_report_generations`), alimentado na geração e atualizado pelo webhook —
+ver *[Report Definitions](#report-definitions-recomendado)* e a trait
+`HasFusionReportGenerations`.
+
+### Campos sempre vazios
+
+O servidor mantém alguns campos em `$hidden`, então nunca chegam no JSON. Estes
+accessors retornam sempre o valor padrão, independentemente da autenticação:
+
+| Accessor | Retorna sempre |
+|---|---|
+| `GenerationResource::errorMessage()` | `null` |
+| `GenerationResource::progressPercent()` | `0` |
+| `WebhookPayload::error()` | `null` |
+| `TemplateResource::filePath()` | `''` |
+| `TemplateResource::resourcesPath()` | `null` |
+
+Na prática: quando uma geração assíncrona falha, o webhook chega com
+`status: 'failed'` e sem motivo. O texto do erro só aparece na geração
+**síncrona**, na mensagem da `FusionReportException`.
+
+---
+
+## Limitações conhecidas
+
+Comportamentos que valem saber antes de integrar. Nenhum é acidental — todos
+estão registrados aqui em vez de serem descobertos em produção.
+
+### Timeout menor que o do servidor
+
+O client espera **60s** por resposta. O servidor concede **90s** ao Jasper numa
+geração síncrona, e ainda gasta tempo depois disso baixando e armazenando os
+arquivos.
+
+Numa geração síncrona pesada, o client desiste antes de o servidor terminar:
+
+```
+t=60s   client estoura → Illuminate\Http\Client\ConnectionException
+t=75s   Jasper devolve o PDF
+t=80s   servidor grava os arquivos e debita a cota
+        → geração existe e foi cobrada, e o client não tem o ID nem os arquivos
+```
+
+Duas consequências práticas:
+
+- **O timeout não é configurável** — está fixo em `FusionReportHttp`.
+- **`ConnectionException` não herda de `FusionReportException`.** Quem faz
+  `catch (FusionReportException $e)` não pega falha de conexão. Capture
+  `Illuminate\Http\Client\ConnectionException` separadamente.
+
+Para relatórios grandes, prefira `generateAsync()` com webhook.
+
+### Sem retry automático
+
+Um 5xx transitório ou soluço de rede vira exceção direto no chamador. Retry não
+foi adicionado de propósito: seria seguro apenas em leituras (`get`, `download`)
+e perigoso em `generate`, `async`, `upload` e `export`, que criam estado e
+consomem cota — o servidor cobra por requisição recebida, então três tentativas
+de uma geração seriam três débitos.
+
+Se precisar, implemente o retry na sua aplicação, envolvendo só as leituras.
+
+### URL do servidor não é configurável
+
+`FusionReportHttp::BASE_URL` é uma constante. Não há `config` nem variável de
+ambiente para apontar o client a outra instância — trocar exige editar o
+package.
+
+### Replay de webhook
+
+O servidor assina apenas o corpo, sem timestamp, então o par corpo+assinatura é
+válido indefinidamente. A deduplicação limita muito o estrago: um replay do
+mesmo status não reexecuta os efeitos. Proteção completa exigiria timestamp
+assinado, o que é mudança no servidor.
+
+Com `log_generations = false` a deduplicação depende só do cache — expirado o
+TTL, um replay volta a disparar os hooks.
+
+### Outros
+
+- A poda de `fusion_report_generations` é fixa em **90 dias**
+  (`FusionReportGeneration::prunable()`), sem config.
+- Os dois `export()` **não** registram a geração nova em
+  `fusion_report_generations`, ao contrário de `generate()` e `generateAsync()`.
+- `generationsByName()` não aceita `theme`. Com o mesmo nome em temas
+  diferentes, não dá para escolher qual histórico buscar.
+- O roteamento do webhook para a `ReportDefinition` casa apenas por `name()`,
+  ignorando o tema.
+
+---
+
 ## Referência completa — Endpoints cobertos
+
+Rotas marcadas com ⚠️ exigem Sanctum e não funcionam via `X-API-KEY`
+(ver seção acima).
 
 | Endpoint | Método do package |
 |---|---|
-| `GET /api/reports` | `templates()->list()` |
-| `POST /api/reports` | `templates()->upload(...)` |
-| `GET /api/reports/{id}` | `templates()->find($id)` |
-| `POST /api/reports/{id}` | `templates()->update($id, ...)` |
-| `POST /api/reports/name/{name}` | `templates()->updateByName($name, ...)` |
-| `DELETE /api/reports/{id}` | `templates()->delete($id)` |
-| `DELETE /api/reports/name/{name}` | `templates()->deleteByName($name, $theme)` |
-| `GET /api/reports/{id}/generations` | `templates()->generations($id)` |
-| `GET /api/reports/name/{name}/generations` | `templates()->generationsByName($name)` |
-| `POST /api/generate` | `report('name')->generate()` |
-| `POST /api/async` | `report('name')->generateAsync()` |
-| `POST /api/reports/{id}/generate` | `reportById($id)->generate()` |
-| `POST /api/reports/{id}/async` | `reportById($id)->generateAsync()` |
-| `GET /api/generations/{id}` | `generation($id)->get()` |
-| `DELETE /api/generations/{id}` | `generation($id)->cancel()` |
-| `GET /api/files/{id}/download` | `file($id)->download()` |
-| `POST /api/files/{id}/export` | `file($id)->export($format)` |
-| `GET /api/jasper/formats` | `jasper()->formats()` |
-| `GET /api/jasper/status` | `jasper()->status()` |
-| `GET /api/jasper/jobs` | `jasper()->jobs()` |
-| `GET /api/jasper/fonts/status` | `jasper()->fontsStatus()` |
-| `POST /api/jasper/fonts/sync` | `jasper()->fontsSync()` |
+| `GET /api/v1/reports` | `templates()->list()` |
+| `POST /api/v1/reports` | `templates()->upload(...)` |
+| `GET /api/v1/reports/{id}` | `templates()->find($id)` |
+| `POST /api/v1/reports/{id}` | `templates()->update($id, ...)` |
+| `POST /api/v1/reports/name/{name}` | `templates()->updateByName($name, ...)` |
+| `GET /api/v1/reports/{id}/jrxml` | `templates()->downloadJrxml($id)` |
+| `DELETE /api/v1/reports/{id}` | `templates()->delete($id)` |
+| `DELETE /api/v1/reports/name/{name}` | `templates()->deleteByName($name, $theme)` |
+| `GET /api/v1/reports/{id}/generations` | `templates()->generations($id)` ⚠️ |
+| `GET /api/v1/reports/name/{name}/generations` | `templates()->generationsByName($name)` ⚠️ |
+| `POST /api/v1/generate` | `report('name')->generate()` |
+| `POST /api/v1/async` | `report('name')->generateAsync()` |
+| `POST /api/v1/reports/{id}/generate` | `reportById($id)->generate()` |
+| `POST /api/v1/reports/{id}/async` | `reportById($id)->generateAsync()` |
+| `GET /api/v1/generations/{id}` | `generation($id)->get()` ⚠️ |
+| `DELETE /api/v1/generations/{id}` | `generation($id)->cancel()` ⚠️ |
+| `GET /api/v1/files/{id}/download` | `file($id)->download()` |
+| `POST /api/v1/files/{id}/export` | `file($id)->export($format)` |
+| `POST /api/v1/generations/{id}/export` | `generation($id)->export($format)` |
+| `GET /api/v1/jasper/formats` | `jasper()->formats()` ⚠️ |
+| `GET /api/v1/jasper/status` | `jasper()->status()` ⚠️ |
+| `GET /api/v1/jasper/jobs` | `jasper()->jobs()` ⚠️ |
+| `GET /api/v1/jasper/fonts/status` | `jasper()->fontsStatus()` ⚠️ |
+| `POST /api/v1/jasper/fonts/sync` | `jasper()->fontsSync()` ⚠️ |
