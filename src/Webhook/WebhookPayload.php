@@ -4,6 +4,7 @@ namespace RiseTechApps\FusionReport\Webhook;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use RiseTechApps\FusionReport\Exceptions\MalformedWebhookException;
 use RiseTechApps\FusionReport\Exceptions\WebhookSignatureException;
 
 class WebhookPayload implements \JsonSerializable
@@ -26,12 +27,12 @@ class WebhookPayload implements \JsonSerializable
 
     public function uuid(): string
     {
-        return $this->data['id'];
+        return $this->requireString('id');
     }
 
     public function status(): string
     {
-        return $this->data['status'];
+        return $this->requireString('status');
     }
 
     public function isSuccess(): bool
@@ -54,6 +55,7 @@ class WebhookPayload implements \JsonSerializable
         return $this->data['frp_id'] ?? null;
     }
 
+    /** Sempre null: `error_message` está em `$hidden` no servidor. */
     public function error(): ?string
     {
         return $this->data['error_message'] ?? null;
@@ -76,6 +78,25 @@ class WebhookPayload implements \JsonSerializable
         return $this->toArray();
     }
 
+    /**
+     * Campo obrigatório do payload.
+     *
+     * `id` e `status` sustentam todo o resto do fluxo; sem eles o acesso direto
+     * ao array virava "Undefined array key" e um 500 opaco.
+     *
+     * @throws MalformedWebhookException
+     */
+    private function requireString(string $key): string
+    {
+        $value = $this->data[$key] ?? null;
+
+        if (! is_string($value) || $value === '') {
+            throw new MalformedWebhookException("Webhook payload missing required field [{$key}].");
+        }
+
+        return $value;
+    }
+
     private static function verifySignature(Request $request, string $secret): void
     {
         $signature = $request->header('X-Webhook-Signature');
@@ -86,10 +107,11 @@ class WebhookPayload implements \JsonSerializable
 
         $expected = 'sha256=' . hash_hmac('sha256', $request->getContent(), $secret);
 
+        // Nunca inclua $expected na mensagem: é a assinatura válida para o corpo
+        // recebido, então devolvê-la transformaria a exceção em oráculo de
+        // assinatura para quem conseguisse observá-la (log, debug, response).
         if (! hash_equals($expected, $signature)) {
-            throw new WebhookSignatureException(
-                "Invalid webhook signature. Received: [{$signature}] Expected: [{$expected}]"
-            );
+            throw new WebhookSignatureException('Invalid webhook signature.');
         }
     }
 }
