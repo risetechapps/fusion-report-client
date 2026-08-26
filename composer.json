@@ -20,8 +20,11 @@
     ],
     "require": {
         "php": "^8.4",
-        "illuminate/support": "^12",
-        "illuminate/http": "^12"
+        "illuminate/bus": "^12",
+        "illuminate/contracts": "^12",
+        "illuminate/http": "^12",
+        "illuminate/queue": "^12",
+        "illuminate/support": "^12"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
@@ -64,6 +67,5 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "version": "1.0.0"
+    "prefer-stable": true
 }
