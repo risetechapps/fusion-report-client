@@ -12,8 +12,7 @@ use RiseTechApps\FusionReport\Exceptions\ReportNotFoundException;
 
 class FusionReportHttp
 {
-//    public const BASE_URL = 'https://fusionreport.app.br';
-    public const BASE_URL = 'https://report.risetech.dev.br';
+    public const BASE_URL = 'https://fusionreport.app.br';
 
     public function __construct(private readonly array $config) {}
 
@@ -74,15 +73,41 @@ class FusionReportHttp
 
     private function baseClient(): \Illuminate\Http\Client\PendingRequest
     {
-        $pending = Http::baseUrl(self::BASE_URL)
+        return Http::baseUrl(self::BASE_URL)
             ->timeout(60)
-            ->acceptJson();
+            ->acceptJson()
+            ->withHeader('X-API-KEY', $this->apiKey());
+    }
 
-        if (! empty($this->config['api_key'])) {
-            $pending = $pending->withHeader('X-API-KEY', $this->config['api_key']);
+    /**
+     * Chave enviada em `X-API-KEY`.
+     *
+     * Lida a cada requisição, não no construtor: o container resolve este
+     * serviço como singleton, então a chave capturada na primeira resolução
+     * valia para o processo inteiro — um container montado antes de o config
+     * estar resolvido mandava toda geração sem o header, e um contexto que
+     * troca a chave em runtime (bootstrapper de tenant, worker de fila que
+     * muda de contexto, teste que sobrescreve o config) continuava usando a
+     * chave anterior.
+     *
+     * O header também deixou de ser opcional: sem chave a requisição saía
+     * anônima e o erro só aparecia como 401 genérico do servidor, longe da
+     * causa real.
+     *
+     * @throws AuthenticationException quando não há chave configurada
+     */
+    private function apiKey(): string
+    {
+        $key = config('fusion-report.api_key') ?? ($this->config['api_key'] ?? null);
+
+        if (! is_string($key) || $key === '') {
+            throw new AuthenticationException(
+                'Missing Fusion Report api_key. Set FUSION_REPORT_API_KEY (config `fusion-report.api_key`) '
+                . 'before generating reports — without it the request is sent with no X-API-KEY header.'
+            );
         }
 
-        return $pending;
+        return $key;
     }
 
     private function assertSuccessful(Response $response): void
