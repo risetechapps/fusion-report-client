@@ -71,6 +71,14 @@ e o versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ### Corrigido
 
+- **`X-API-KEY` deixava de ser enviado quando a chave não estava resolvida na
+  primeira vez que o container montou o serviço.** `FusionReportHttp` é
+  singleton e capturava `api_key` no construtor, então o valor do primeiro
+  contexto valia para o processo inteiro: geração saía sem o header e o servidor
+  respondia 401. Mesmo efeito para quem troca a chave em runtime — bootstrapper
+  de tenant, worker de fila que muda de contexto, teste que sobrescreve o
+  config. A chave passa a ser lida a cada requisição, com o array recebido no
+  construtor como fallback.
 - Com `log_generations = false`, todo callback de webhook virava no-op. O
   handler buscava o registro em `fusion_report_generations` e retornava cedo
   quando não achava — mas com o log desligado o registro nunca é criado, então
@@ -134,6 +142,13 @@ e o versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ### Alterado
 
+- **`api_key` passa a ser obrigatória.** O header só era anexado quando a chave
+  existia (`if (! empty(...))`), então uma configuração incompleta virava
+  requisição anônima e o erro chegava como 401 genérico do servidor, longe da
+  causa. Sem chave, o package agora lança `AuthenticationException` antes de
+  qualquer requisição sair, apontando `FUSION_REPORT_API_KEY`. Afeta também
+  `file($id)->download()`, cuja rota é pública no servidor e antes funcionava
+  sem chave nenhuma.
 - `FusionReportHttp` passa a ler a mensagem de erro de `message` **ou** `error`.
   O middleware de cota do servidor responde `{"error": "..."}`, então o motivo
   do 429 se perdia e virava `"Fusion Report Server error [429]."`.

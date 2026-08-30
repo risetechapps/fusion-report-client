@@ -95,6 +95,15 @@ FUSION_REPORT_WEBHOOK_SECRET=seu_secret   # obrigatorio: sem ele o webhook respo
 FUSION_REPORT_WEBHOOK_QUEUE=false
 ```
 
+> **`api_key` é obrigatória.** É ela que vai no header `X-API-KEY`, a única
+> credencial que o client usa. Sem ela, qualquer chamada — inclusive
+> `file($id)->download()` — lança `AuthenticationException` antes de a
+> requisição sair, em vez de partir anônima e voltar como 401 genérico.
+>
+> A chave é lida do config a cada requisição, não uma vez na inicialização.
+> Aplicações que a definem em runtime (bootstrapper de tenant, worker de fila
+> que troca de contexto) são atendidas com o valor do contexto corrente.
+
 ---
 
 ## Templates JRXML
@@ -842,7 +851,8 @@ try {
     // Cota do plano esgotada — reenfileire para depois
     $wait = $e->retryAfter() ?? 60;   // segundos, quando o servidor informa
 } catch (AuthenticationException $e) {
-    // api_key ausente/inválida, ou rota restrita ao dashboard
+    // api_key não configurada (lançada antes da requisição sair),
+    // api_key inválida, ou rota restrita ao dashboard
 } catch (AuthorizationException $e) {
     // Recurso de outra conta
 } catch (ReportNotFoundException $e) {
@@ -868,6 +878,7 @@ try {
 
 | HTTP | Situação | Exception |
 |---|---|---|
+| — | `api_key` não configurada — nenhuma requisição chega a sair | `AuthenticationException` |
 | 401 | Credencial ausente/inválida, ou rota só de dashboard | `AuthenticationException` |
 | 403 | Recurso pertence a outra conta | `AuthorizationException` |
 | 422 | Campo obrigatório ausente ou arquivo inválido | `FusionReportException` |
