@@ -1,0 +1,25 @@
+/vendor/
+/node_modules/
+/coverage/
+/build/
+
+composer.phar
+
+.phpunit.result.cache
+/.phpunit.cache/
+.php-cs-fixer.cache
+/.pint.cache
+
+.env
+.env.backup
+
+/.idea/
+/.vscode/
+/.fleet/
+/.claude/settings.local.json
+
+.DS_Store
+Thumbs.db
+
+# Biblioteca: o lock nao e usado por quem consome o package.
+composer.lock

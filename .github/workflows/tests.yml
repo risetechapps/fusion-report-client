@@ -1,0 +1,41 @@
+name: Testes
+
+# Package sem imagem: só a suíte, em todo push e pull request.
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Pest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring, intl, pdo_sqlite
+          coverage: none
+
+      # Sem composer.lock (biblioteca): resolve as versões mais novas que o
+      # composer.json aceita — as mesmas que um app instalaria hoje.
+      - name: Instalar dependências
+        run: composer update --no-interaction --no-progress --prefer-dist
+
+      - name: Rodar testes
+        run: vendor/bin/pest
