@@ -15,14 +15,11 @@ class FusionReportServiceProvider extends ServiceProvider
     #[\Override]
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/fusion-report.php', 'fusion-report');
+        $this->mergeConfigFrom(__DIR__.'/../config/fusion-report.php', 'fusion-report');
 
         $this->app->bind(WebhookHandler::class, FusionReportWebhookHandler::class);
 
-        $this->app->singleton(
-            FusionReportHttp::class,
-            fn($app) => new FusionReportHttp($app->make('config')->get('fusion-report')),
-        );
+        $this->app->singleton(FusionReportHttp::class);
 
         $this->app->singleton(FusionReportClient::class, function ($app) {
             $config = $app->make('config')->get('fusion-report');
@@ -39,8 +36,8 @@ class FusionReportServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        $this->loadRoutesFrom(__DIR__ . '/../routes/webhook.php');
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        $this->loadRoutesFrom(__DIR__.'/../routes/webhook.php');
+        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         $this->callAfterResolving(Schedule::class, function (Schedule $schedule) {
             $schedule->command('model:prune', ['--model' => FusionReportGeneration::class])->daily();
@@ -52,11 +49,11 @@ class FusionReportServiceProvider extends ServiceProvider
             ]);
 
             $this->publishes([
-                __DIR__ . '/../config/fusion-report.php' => config_path('fusion-report.php'),
+                __DIR__.'/../config/fusion-report.php' => config_path('fusion-report.php'),
             ], 'fusion-report');
 
             $this->publishes([
-                __DIR__ . '/../database/migrations' => database_path('migrations'),
+                __DIR__.'/../database/migrations' => database_path('migrations'),
             ], 'fusion-report-migrations');
         }
     }

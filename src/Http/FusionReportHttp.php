@@ -2,6 +2,7 @@
 
 namespace RiseTechApps\FusionReport\Http;
 
+use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use RiseTechApps\FusionReport\Exceptions\AuthenticationException;
@@ -13,13 +14,11 @@ use RiseTechApps\FusionReport\Exceptions\ServerException;
 
 class FusionReportHttp
 {
-    /** URL padrão — sobrescrita por `fusion-report.url` (FUSION_REPORT_URL). */
+    /** Servidor do Fusion Report, sem barra final. Fixo: não vem do config. */
     public const BASE_URL = 'https://fusionreport.app.br';
 
     /** Segundos — sobrescrito por `fusion-report.timeout` (FUSION_REPORT_TIMEOUT). */
     public const DEFAULT_TIMEOUT = 60;
-
-    public function __construct(private readonly array $config) {}
 
     public function post(string $endpoint, array $data): array
     {
@@ -41,17 +40,36 @@ class FusionReportHttp
 
     public function delete(string $endpoint, array $query = []): void
     {
-        $response = $this->client()->delete($endpoint, $query);
+        // Na query string de verdade: `delete($url, $data)` do client HTTP manda
+        // `$data` no corpo JSON, e o servidor lê `theme` da query — o
+        // `deleteByName('x', 'azul')` caía no tema `default`.
+        $response = $this->client()->withQueryParameters($query)->delete($endpoint);
 
         $this->assertSuccessful($response);
     }
 
-    public function postMultipart(string $endpoint, array $fields, string $filePath, string $fileName, ?string $resourcesPath = null): array
-    {
+    /**
+     * POST multipart. Arquivo e resources são opcionais: a edição de template
+     * aceita só os campos de texto.
+     *
+     * @param  array  $query  vai na query string, não no corpo — o servidor
+     *                        localiza o template por nome com `?theme=`
+     */
+    public function postMultipart(
+        string $endpoint,
+        array $fields,
+        ?string $filePath = null,
+        ?string $fileName = null,
+        ?string $resourcesPath = null,
+        array $query = [],
+    ): array {
+        $request = $this->baseClient()->asMultipart()->withQueryParameters($query);
+
         // Stream em vez de file_get_contents: o template e o zip de resources
         // (até 10 MB cada) não precisam passar inteiros pela memória.
-        $request = $this->baseClient()
-            ->attach('file', $this->openForUpload($filePath), $fileName);
+        if ($filePath !== null) {
+            $request = $request->attach('file', $this->openForUpload($filePath), $fileName ?? basename($filePath));
+        }
 
         if ($resourcesPath !== null) {
             $request = $request->attach('resources', $this->openForUpload($resourcesPath), basename($resourcesPath));
@@ -73,18 +91,6 @@ class FusionReportHttp
         return $response;
     }
 
-    /**
-     * URL do servidor, sem barra final.
-     *
-     * Lida a cada requisição pelo mesmo motivo da chave (ver apiKey()).
-     */
-    public static function baseUrl(): string
-    {
-        $url = config('fusion-report.url');
-
-        return rtrim(is_string($url) && $url !== '' ? $url : self::BASE_URL, '/');
-    }
-
     /** @return resource */
     private function openForUpload(string $path)
     {
@@ -97,14 +103,14 @@ class FusionReportHttp
         return $handle;
     }
 
-    private function client(): \Illuminate\Http\Client\PendingRequest
+    private function client(): PendingRequest
     {
         return $this->baseClient()->asJson();
     }
 
-    private function baseClient(): \Illuminate\Http\Client\PendingRequest
+    private function baseClient(): PendingRequest
     {
-        return Http::baseUrl(self::baseUrl())
+        return Http::baseUrl(self::BASE_URL)
             ->timeout((int) (config('fusion-report.timeout') ?: self::DEFAULT_TIMEOUT))
             ->acceptJson()
             ->withHeader('X-API-KEY', $this->apiKey());
@@ -129,12 +135,12 @@ class FusionReportHttp
      */
     private function apiKey(): string
     {
-        $key = config('fusion-report.api_key') ?? ($this->config['api_key'] ?? null);
+        $key = config('fusion-report.api_key');
 
         if (! is_string($key) || $key === '') {
             throw new AuthenticationException(
                 'Missing Fusion Report api_key. Set FUSION_REPORT_API_KEY (config `fusion-report.api_key`) '
-                . 'before generating reports — without it the request is sent with no X-API-KEY header.'
+                .'before generating reports — without it the request is sent with no X-API-KEY header.'
             );
         }
 
@@ -148,8 +154,8 @@ class FusionReportHttp
             $message = $this->messageFrom($response) ?? 'Validation failed.';
 
             if ($errors) {
-                $details = collect($errors)->map(fn($msgs) => implode(' ', $msgs))->implode(' ');
-                $message .= ' ' . $details;
+                $details = collect($errors)->map(fn ($msgs) => implode(' ', $msgs))->implode(' ');
+                $message .= ' '.$details;
             }
 
             throw new FusionReportException($message);

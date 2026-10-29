@@ -13,11 +13,15 @@ use RiseTechApps\FusionReport\Resources\FileResource;
 use RiseTechApps\FusionReport\Resources\GenerationResource;
 
 /**
- * @method static ReportRequestBuilder  report(string $template)
- * @method static TemplateManager       templates()
- * @method static FileResource          file(string $fileId)
- * @method static GenerationResource    generation(string $generationId)
+ * @method static void register(string $name, string $definition)
+ * @method static ReportRequestBuilder make(string $name, array $params = [])
+ * @method static ReportRequestBuilder report(string $template)
+ * @method static ReportRequestBuilder reportById(string $id)
+ * @method static TemplateManager templates()
+ * @method static FileResource file(string $fileId)
+ * @method static GenerationResource generation(string $generationId)
  * @method static ReportDefinition|null definition(string $name)
+ * @method static ReportDefinition|null definitionFor(string $templateName)
  *
  * @see FusionReportClient
  */

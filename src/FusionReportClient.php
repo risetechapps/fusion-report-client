@@ -6,7 +6,6 @@ use InvalidArgumentException;
 use RiseTechApps\FusionReport\Builders\ReportRequestBuilder;
 use RiseTechApps\FusionReport\Definitions\ReportDefinition;
 use RiseTechApps\FusionReport\Http\FusionReportHttp;
-use RiseTechApps\FusionReport\Managers\JasperManager;
 use RiseTechApps\FusionReport\Managers\TemplateManager;
 use RiseTechApps\FusionReport\Resources\FileResource;
 use RiseTechApps\FusionReport\Resources\GenerationResource;
@@ -34,7 +33,28 @@ class FusionReportClient
     {
         $class = $this->registry[$name] ?? null;
 
-        return $class === null ? null : new $class();
+        return $class === null ? null : app($class);
+    }
+
+    /**
+     * Definição registrada cujo `name()` é o template informado, ou null.
+     *
+     * Busca pelo nome no servidor, não pela chave do registro — é o que o
+     * callback traz em `template_name`. Cobre tanto `fusion-report.reports`
+     * quanto o que foi registrado em runtime via `register()`.
+     */
+    public function definitionFor(string $templateName): ?ReportDefinition
+    {
+        foreach ($this->registry as $class) {
+            /** @var ReportDefinition $definition */
+            $definition = app($class);
+
+            if ($definition->name() === $templateName) {
+                return $definition;
+            }
+        }
+
+        return null;
     }
 
     public function make(string $name, array $params = []): ReportRequestBuilder
@@ -43,15 +63,15 @@ class FusionReportClient
             ?? throw new InvalidArgumentException("Report definition [{$name}] not registered.");
 
         /** @var ReportDefinition $definition */
-        $definition = new $class();
+        $definition = app($class);
 
-        $merged = array_merge($definition->defaultParams(), $params);
+        $merged = array_replace($definition->defaultParams(), $params);
 
         $builder = $this->report($definition->name())
             ->params($merged)
             ->datasource($definition->datasource($merged))
             ->webhookParams($definition->webhookParams($merged))
-            ->setAfterGenerate(fn($generation, $context) => $definition->onGenerated($generation, $context));
+            ->setAfterGenerate(fn ($generation, $context) => $definition->onGenerated($generation, $context));
 
         if ($protection = $definition->protection()) {
             $builder->protection($protection);
@@ -93,11 +113,6 @@ class FusionReportClient
     public function templates(): TemplateManager
     {
         return new TemplateManager($this->http);
-    }
-
-    public function jasper(): JasperManager
-    {
-        return new JasperManager($this->http);
     }
 
     public function file(string $fileId): FileResource
