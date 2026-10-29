@@ -2,6 +2,7 @@
 
 namespace RiseTechApps\FusionReport\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -10,6 +11,7 @@ use RiseTechApps\FusionReport\Resources\GenerationResource;
 class FusionReportGeneration extends Model
 {
     use MassPrunable;
+
     protected $table = 'fusion_report_generations';
 
     protected $fillable = [
@@ -25,12 +27,12 @@ class FusionReportGeneration extends Model
     ];
 
     protected $casts = [
-        'formats'       => 'array',
+        'formats' => 'array',
         'download_urls' => 'array',
-        'context'       => 'array',
+        'context' => 'array',
     ];
 
-    public function prunable(): \Illuminate\Database\Eloquent\Builder
+    public function prunable(): Builder
     {
         return static::where('created_at', '<', now()->subDays(90));
     }
@@ -44,7 +46,7 @@ class FusionReportGeneration extends Model
     {
         $downloadUrls = $generation->isCompleted()
             ? $generation->files()
-                ->mapWithKeys(fn($file) => [$file->format() => $file->url()])
+                ->mapWithKeys(fn ($file) => [$file->format() => $file->url()])
                 ->toArray()
             : null;
 
@@ -53,14 +55,16 @@ class FusionReportGeneration extends Model
         return static::updateOrCreate(
             ['generation_uuid' => $generation->id()],
             [
-                'frp_uuid'      => $generation->frpId(),
-                'name'          => $generation->templateName(),
-                'formats'       => $generation->requestedFormats(),
+                'frp_uuid' => $generation->frpId(),
+                'name' => $generation->templateName(),
+                'formats' => $generation->requestedFormats(),
                 'download_urls' => $downloadUrls,
-                'status'        => $generation->currentStatus(),
-                'context'       => $context ?: null,
-                'loggable_type' => $owner ? $owner::class : null,
-                'loggable_id'   => $owner?->getKey(),
+                'status' => $generation->currentStatus(),
+                'context' => $context ?: null,
+                // getMorphClass() e não ::class: com morph map no app, a relação
+                // busca pelo alias, e a linha gravada com o FQCN ficava invisível.
+                'loggable_type' => $owner?->getMorphClass(),
+                'loggable_id' => $owner?->getKey(),
             ],
         );
     }
@@ -76,9 +80,9 @@ class FusionReportGeneration extends Model
         $data = ['status' => $generation->currentStatus()];
 
         if ($generation->isCompleted()) {
-            $data['frp_uuid']      = $generation->frpId();
+            $data['frp_uuid'] = $generation->frpId();
             $data['download_urls'] = $generation->files()
-                ->mapWithKeys(fn($file) => [$file->format() => $file->url()])
+                ->mapWithKeys(fn ($file) => [$file->format() => $file->url()])
                 ->toArray();
         }
 

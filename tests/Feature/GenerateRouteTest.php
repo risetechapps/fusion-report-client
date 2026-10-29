@@ -51,3 +51,24 @@ it('só envia por e-mail para o endereço do próprio usuário', function () {
         'name' => 'por_cliente', 'params' => ['cliente_id' => 7], 'email' => 'DONO@exemplo.com',
     ])->assertOk();
 });
+
+it('responde 422 quando format não é string nem lista de strings', function (mixed $format) {
+    $this->postJson('/reports/generate', [
+        'name' => 'por_cliente', 'params' => ['cliente_id' => 7], 'format' => $format,
+    ])->assertUnprocessable()->assertJsonValidationErrors('format');
+
+    Http::assertNothingSent();
+})->with([
+    'número' => 123,
+    'lista aninhada' => [[['pdf']]],
+    'mapa' => [['a' => 'pdf']],
+]);
+
+it('aceita format como string ou lista', function (mixed $format) {
+    $this->postJson('/reports/generate', [
+        'name' => 'por_cliente', 'params' => ['cliente_id' => 7], 'format' => $format,
+    ])->assertOk();
+})->with([
+    'string' => 'pdf,xlsx',
+    'lista' => [['pdf', 'xlsx']],
+]);

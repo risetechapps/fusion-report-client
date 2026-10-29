@@ -12,11 +12,21 @@ class GenerateController extends Controller
     public function __invoke(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'name'   => ['required', 'string'],
+            'name' => ['required', 'string'],
             'params' => ['sometimes', 'array'],
-            'format' => ['sometimes'],
-            'mode'   => ['sometimes', 'in:sync,async'],
-            'email'  => ['sometimes', 'email'],
+            // 'pdf', 'pdf,xlsx' ou ['pdf', 'xlsx'] — o que o builder aceita. Sem
+            // checar o tipo, um número ou objeto estourava TypeError (500) em
+            // vez de 422. Os formatos em si o servidor valida.
+            'format' => ['sometimes', function (string $attribute, mixed $value, \Closure $fail) {
+                $valid = is_string($value)
+                    || (is_array($value) && array_is_list($value) && array_all($value, fn ($item) => is_string($item)));
+
+                if (! $valid) {
+                    $fail('The :attribute must be a string or a list of strings.');
+                }
+            }],
+            'mode' => ['sometimes', 'in:sync,async'],
+            'email' => ['sometimes', 'email'],
         ]);
 
         // Só relatórios registrados em `fusion-report.reports`, e só com o aval da
@@ -28,8 +38,8 @@ class GenerateController extends Controller
             return response()->json(['success' => false, 'message' => 'Report not found.'], 404);
         }
 
-        $user   = $request->user();
-        $params = array_merge($definition->defaultParams(), $validated['params'] ?? []);
+        $user = $request->user();
+        $params = array_replace($definition->defaultParams(), $validated['params'] ?? []);
 
         if (! $definition->authorize($user, $params)) {
             return response()->json(['success' => false, 'message' => 'This action is unauthorized.'], 403);
@@ -49,7 +59,7 @@ class GenerateController extends Controller
         if (! empty($validated['email'])) {
             $builder->context([
                 'send_email' => true,
-                'email'      => $validated['email'],
+                'email' => $validated['email'],
             ]);
         }
 
@@ -59,16 +69,16 @@ class GenerateController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => [
+            'data' => [
                 'generation_id' => $generation->id(),
-                'status'        => $generation->currentStatus(),
-                'mode'          => $generation->mode(),
-                'files'         => $generation->files()
-                    ->map(fn($file) => [
-                        'id'         => $file->id(),
-                        'filename'   => $file->filename(),
-                        'format'     => $file->format(),
-                        'url'        => $file->url(),
+                'status' => $generation->currentStatus(),
+                'mode' => $generation->mode(),
+                'files' => $generation->files()
+                    ->map(fn ($file) => [
+                        'id' => $file->id(),
+                        'filename' => $file->filename(),
+                        'format' => $file->format(),
+                        'url' => $file->url(),
                         'expires_at' => $file->expiresAt(),
                     ])
                     ->values(),
