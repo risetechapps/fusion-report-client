@@ -5,18 +5,18 @@ namespace RiseTechApps\FusionReport\Definitions;
 use RiseTechApps\FusionReport\Exceptions\FusionReportException;
 
 /**
-* Describes a theme of a report.
+ * Describes a theme of a report.
  *
  * On the server, the identity of a template is the pair (name + theme), so each
  * ThemeFusion corresponds to a distinct template, with its own .jrxml file,
- * Resources and description.
+ * resources and description.
  *
- * Fluent Construction:
+ * Fluent construction:
  *
- * ThemeFusion::make('default')
- * ->from(base_path('reports/tenant_all/default.jrxml'))
- * ->withResources(base_path('reports/tenant_all/default.zip'))
- * ->describedAs('Tenant Report');
+ *     ThemeFusion::make('default')
+ *         ->from(base_path('reports/tenant_all/default.jrxml'))
+ *         ->withResources(base_path('reports/tenant_all/default.zip'))
+ *         ->describedAs('Tenant Report');
  */
 final class ThemeFusion
 {
@@ -90,6 +90,10 @@ final class ThemeFusion
      */
     public function validate(): void
     {
+        if (trim($this->name) === '') {
+            throw new FusionReportException('Theme name is empty.');
+        }
+
         if (empty($this->path)) {
             throw new FusionReportException("Theme '{$this->name}': .jrxml file not defined (use ->from()).");
         }

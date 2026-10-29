@@ -16,14 +16,18 @@ afetada. Confirmamos o recebimento e retornamos com um plano de correção.
 
 ### Segredo do webhook
 
-O package verifica a assinatura HMAC-SHA256 do callback usando
-`fusion-report.webhook.secret`. **Configure sempre esse valor em produção.**
+O package verifica a assinatura HMAC-SHA256 de `"{X-Webhook-Timestamp}.{corpo}"`
+usando `fusion-report.webhook.secret`, recusa timestamp com mais de 5 minutos
+de diferença e ignora `X-Webhook-Id` repetido. **Configure sempre o segredo em
+produção.**
 
-Quando o segredo está vazio, `WebhookPayload::fromRequest()` pula a verificação
-e a rota do webhook aceita qualquer POST — o que permite a terceiros alterar
-status e URLs de download em `fusion_report_generations`. Esse comportamento é
-herdado e será endurecido; até lá, tratar o segredo como obrigatório é
-responsabilidade da aplicação.
+Quando o segredo está vazio, a rota do webhook responde 503 e não processa
+nada. `FUSION_REPORT_WEBHOOK_REQUIRE_SIGNATURE=false` desliga essa trava e
+aceita qualquer POST — o que permite a terceiros alterar status e URLs de
+download em `fusion_report_generations`. Use só em desenvolvimento local.
+
+A janela de 5 minutos depende do relógio do servidor da app: mantenha NTP
+ligado.
 
 Gere o segredo no dashboard do Fusion Report Server e mantenha-o igual dos dois
 lados:

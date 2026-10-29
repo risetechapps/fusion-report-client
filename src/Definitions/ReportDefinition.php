@@ -41,7 +41,7 @@ abstract class ReportDefinition
      * Parameters to be appended to the webhook base URL (query string).
      * Useful for loading context that the callback needs — e.g., tenant_id.
      *
-     * @param array<string, mixed> $params Parameters already merged from generation
+     * @param  array<string, mixed>  $params  Parameters already merged from generation
      * @return array<string, scalar>
      */
     public function webhookParams(array $params = []): array
@@ -71,7 +71,7 @@ abstract class ReportDefinition
      * relatório vai receber. Não vale para `FusionReport::make()` chamado no
      * código da aplicação, que já é confiável.
      *
-     * @param array<string, mixed> $params
+     * @param  array<string, mixed>  $params
      */
     public function authorize(?Authenticatable $user, array $params): bool
     {
@@ -91,9 +91,18 @@ abstract class ReportDefinition
         return is_string($own) && strcasecmp(trim($own), trim($email)) === 0;
     }
 
+    /**
+     * Dono gravado em `fusion_report_generations.loggable`.
+     *
+     * Por padrão, o usuário autenticado — desde que seja um Model. Um guard que
+     * devolve `GenericUser` ou outro Authenticatable sem tabela estourava
+     * TypeError no retorno; agora a geração só fica sem dono.
+     */
     public function owner(): ?Model
     {
-        return auth()->user();
+        $user = auth()->user();
+
+        return $user instanceof Model ? $user : null;
     }
 
     /**

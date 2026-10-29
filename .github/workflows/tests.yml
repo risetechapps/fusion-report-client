@@ -5,8 +5,9 @@ on:
   push:
     branches:
       - '**'
+    # As tags do package não têm prefixo `v` (ex.: 1.0.0).
     tags:
-      - 'v*'
+      - '*'
   pull_request:
 
 concurrency:
@@ -32,10 +33,16 @@ jobs:
           extensions: mbstring, intl, pdo_sqlite
           coverage: none
 
+      - name: Validar composer.json
+        run: composer validate --strict
+
       # Sem composer.lock (biblioteca): resolve as versões mais novas que o
       # composer.json aceita — as mesmas que um app instalaria hoje.
       - name: Instalar dependências
         run: composer update --no-interaction --no-progress --prefer-dist
+
+      - name: Conferir formatação (Pint)
+        run: vendor/bin/pint --test
 
       - name: Rodar testes
         run: vendor/bin/pest

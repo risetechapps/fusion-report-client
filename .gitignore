@@ -23,3 +23,6 @@ Thumbs.db
 
 # Biblioteca: o lock nao e usado por quem consome o package.
 composer.lock
+
+# Contrato do servidor (referência local, não versionado)
+openapi.yml

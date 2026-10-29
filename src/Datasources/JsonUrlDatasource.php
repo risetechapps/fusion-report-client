@@ -22,6 +22,17 @@ class JsonUrlDatasource implements Datasource
         return new static($url, 'post', static::normalizeHeaders($headers));
     }
 
+    /** O servidor envia `{}` como corpo, como no `post()`. */
+    public static function put(string $url, array $headers = []): static
+    {
+        return new static($url, 'put', static::normalizeHeaders($headers));
+    }
+
+    public static function delete(string $url, array $headers = []): static
+    {
+        return new static($url, 'delete', static::normalizeHeaders($headers));
+    }
+
     public function type(): string
     {
         return 'jsonUrl';
@@ -30,8 +41,8 @@ class JsonUrlDatasource implements Datasource
     public function config(): array
     {
         return array_filter([
-            'url'     => $this->url,
-            'method'  => $this->method,
+            'url' => $this->url,
+            'method' => $this->method,
             'headers' => $this->headers ?: null,
         ]);
     }
@@ -42,6 +53,7 @@ class JsonUrlDatasource implements Datasource
         foreach ($headers as $key => $value) {
             $result[] = is_int($key) ? $value : "{$key}={$value}";
         }
+
         return $result;
     }
 }

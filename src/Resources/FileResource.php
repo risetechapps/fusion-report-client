@@ -3,6 +3,7 @@
 namespace RiseTechApps\FusionReport\Resources;
 
 use Illuminate\Http\Client\Response;
+use RiseTechApps\FusionReport\Exceptions\FusionReportException;
 use RiseTechApps\FusionReport\Http\FusionReportHttp;
 
 class FileResource implements \JsonSerializable
@@ -12,9 +13,16 @@ class FileResource implements \JsonSerializable
         private readonly FusionReportHttp $http,
     ) {}
 
+    /** @throws FusionReportException quando a resposta veio sem `id` */
     public function id(): string
     {
-        return $this->data['id'];
+        $id = $this->data['id'] ?? null;
+
+        if (! is_string($id) || $id === '') {
+            throw FusionReportException::missingId('file', $this->data);
+        }
+
+        return $id;
     }
 
     public function filename(): string
@@ -30,7 +38,7 @@ class FileResource implements \JsonSerializable
     public function url(): string
     {
         return $this->data['download_url']
-            ?? FusionReportHttp::baseUrl() . '/api/v1/files/' . $this->id() . '/download';
+            ?? FusionReportHttp::BASE_URL.'/api/v1/files/'.rawurlencode($this->id()).'/download';
     }
 
     public function expiresAt(): ?string
@@ -38,25 +46,23 @@ class FileResource implements \JsonSerializable
         return $this->data['expires_at'] ?? null;
     }
 
-    public function createdAt(): ?string
+    /** Tamanho em bytes; null quando o servidor não informa. */
+    public function size(): ?int
     {
-        return $this->data['created_at'] ?? null;
-    }
+        $size = $this->data['size'] ?? null;
 
-    public function updatedAt(): ?string
-    {
-        return $this->data['updated_at'] ?? null;
+        return is_numeric($size) ? (int) $size : null;
     }
 
     public function download(): Response
     {
-        return $this->http->download("/api/v1/files/{$this->id()}/download");
+        return $this->http->download('/api/v1/files/'.rawurlencode($this->id()).'/download');
     }
 
     /** Re-exports a .frp file to the given format. Returns a new GenerationResource. */
     public function export(string $format): GenerationResource
     {
-        $response = $this->http->post("/api/v1/files/{$this->id()}/export", ['format' => $format]);
+        $response = $this->http->post('/api/v1/files/'.rawurlencode($this->id()).'/export', ['format' => $format]);
 
         return new GenerationResource($response, $this->http);
     }

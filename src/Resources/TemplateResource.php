@@ -2,13 +2,22 @@
 
 namespace RiseTechApps\FusionReport\Resources;
 
+use RiseTechApps\FusionReport\Exceptions\FusionReportException;
+
 class TemplateResource implements \JsonSerializable
 {
     public function __construct(private readonly array $data) {}
 
+    /** @throws FusionReportException quando a resposta veio sem `id` */
     public function id(): string
     {
-        return $this->data['id'];
+        $id = $this->data['id'] ?? null;
+
+        if (! is_string($id) || $id === '') {
+            throw FusionReportException::missingId('template', $this->data);
+        }
+
+        return $id;
     }
 
     public function name(): string

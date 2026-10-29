@@ -8,9 +8,14 @@ class InlineJsonDatasource implements Datasource
 {
     private function __construct(private readonly string $json) {}
 
+    /**
+     * @throws \JsonException quando os dados não serializam (ex.: UTF-8
+     *                        inválido) — antes o `false` do json_encode virava `''` e o
+     *                        relatório saía em branco sem erro
+     */
     public static function from(array $data): static
     {
-        return new static(json_encode($data));
+        return new static(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
     }
 
     public static function fromJson(string $json): static

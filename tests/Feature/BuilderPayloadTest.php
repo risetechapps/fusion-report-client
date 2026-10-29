@@ -1,6 +1,5 @@
 <?php
 
-use Illuminate\Http\Client\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use RiseTechApps\FusionReport\Exceptions\FusionReportException;
@@ -29,23 +28,23 @@ it('serializa cada tipo de param para KEY=valor', function (mixed $value, string
 
     expect(($this->sent)()['params'])->toBe(["P={$expected}"]);
 })->with([
-    'null'      => [null, ''],
-    'true'      => [true, 'true'],
-    'false'     => [false, 'false'], // antes virava `P=`, igual a string vazia
-    'int'       => [2026, '2026'],
-    'float'     => [1.5, '1.5'],
-    'string'    => ['Acme', 'Acme'],
-    'enum'      => [Situacao::Ativo, 'ATIVO'],
-    'data'      => [Carbon::parse('2026-10-28 10:00:00', 'UTC'), '2026-10-28T10:00:00+00:00'],
+    'null' => [null, ''],
+    'true' => [true, 'true'],
+    'false' => [false, 'false'], // antes virava `P=`, igual a string vazia
+    'int' => [2026, '2026'],
+    'float' => [1.5, '1.5'],
+    'string' => ['Acme', 'Acme'],
+    'enum' => [Situacao::Ativo, 'ATIVO'],
+    'data' => [Carbon::parse('2026-10-28 10:00:00', 'UTC'), '2026-10-28'], // yyyy-MM-dd do java.util.Date
     'Stringable' => [str('Acme'), 'Acme'],
-    'array'     => [[1, 2, 'três'], '[1,2,"três"]'], // antes: "Array to string conversion"
+    'array' => [[1, 2, 'três'], '[1,2,"três"]'], // antes: "Array to string conversion"
 ]);
 
 it('recusa param sem representação textual', function (mixed $value, string $type) {
-    expect(fn() => FusionReport::report('x')->params(['P' => $value])->generate())
+    expect(fn () => FusionReport::report('x')->params(['P' => $value])->generate())
         ->toThrow(FusionReportException::class, "Report param [P] of type {$type} cannot be serialized.");
 })->with([
-    'objeto'         => [new stdClass, 'stdClass'],
+    'objeto' => [new stdClass, 'stdClass'],
     'enum sem valor' => [Prioridade::Alta, Prioridade::class],
 ]);
 
@@ -94,11 +93,11 @@ it('normaliza o format informado', function (string|array $format, array $expect
 
     expect(($this->sent)()['format'])->toBe($expected);
 })->with([
-    'string'                => ['pdf', ['pdf']],
-    'separado por vírgula'  => ['PDF, xlsx', ['pdf', 'xlsx']],
-    'array'                 => [[' Docx ', 'csv'], ['docx', 'csv']],
-    'repetidos'             => [['pdf', 'PDF', 'pdf'], ['pdf']],
-    'itens vazios'          => ['pdf,,', ['pdf']],
+    'string' => ['pdf', ['pdf']],
+    'separado por vírgula' => ['PDF, xlsx', ['pdf', 'xlsx']],
+    'array' => [[' Docx ', 'csv'], ['docx', 'csv']],
+    'repetidos' => [['pdf', 'PDF', 'pdf'], ['pdf']],
+    'itens vazios' => ['pdf,,', ['pdf']],
 ]);
 
 it('acumula formatos entre chamadas, sem repetir', function () {
@@ -160,20 +159,44 @@ it('preserva chaves numéricas nos webhookParams', function () {
 });
 
 it('recusa item de format que não é string, sem enviar nada', function (array $format, string $type) {
-    expect(fn() => FusionReport::report('x')->format($format)->generate())
+    expect(fn () => FusionReport::report('x')->format($format)->generate())
         ->toThrow(FusionReportException::class, "Report format must be a string, {$type} given.");
 
     Http::assertNothingSent();
 })->with([
     'array aninhado' => [[['pdf']], 'array'],
-    'int'            => [[1], 'int'],
-    'null'           => [['pdf', null], 'null'],
+    'int' => [[1], 'int'],
+    'null' => [['pdf', null], 'null'],
 ]);
+
+// ── webhook ──────────────────────────────────────────────────────────────
+
+it('manda o webhook do config também no síncrono, para o caso do 202', function () {
+    config(['fusion-report.webhook.url' => 'https://app.test/hook']);
+
+    FusionReport::report('x')->webhookParams(['t' => 1])->generate();
+
+    expect(($this->sent)()['webhook_url'])->toBe('https://app.test/hook?t=1');
+});
+
+it('aceita webhook explícito no síncrono', function () {
+    FusionReport::report('x')->generate(webhook: 'https://outro.test/hook');
+
+    expect(($this->sent)()['webhook_url'])->toBe('https://outro.test/hook');
+});
+
+it('omite webhook_url no síncrono sem webhook configurado', function () {
+    config(['fusion-report.webhook.url' => null]);
+
+    FusionReport::report('x')->generate();
+
+    expect(($this->sent)())->not->toHaveKey('webhook_url');
+});
 
 it('recusa defaults.format inválido no config', function () {
     config(['fusion-report.defaults.format' => [['pdf']]]);
 
-    expect(fn() => FusionReport::report('x')->generate())
+    expect(fn () => FusionReport::report('x')->generate())
         ->toThrow(FusionReportException::class, 'Report format must be a string, array given.');
 
     Http::assertNothingSent();

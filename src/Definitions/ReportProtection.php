@@ -22,7 +22,7 @@ class ReportProtection
     public function toArray(): array
     {
         return array_filter([
-            'protect_document'         => $this->userPassword,
+            'protect_document' => $this->userPassword,
             'protect_document_default' => $this->ownerPassword,
         ]);
     }

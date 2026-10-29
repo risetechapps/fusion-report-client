@@ -6,6 +6,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Sleep;
 use RiseTechApps\FusionReport\Exceptions\FusionReportException;
+use RiseTechApps\FusionReport\Exceptions\ReportNotFoundException;
 use RiseTechApps\FusionReport\Http\FusionReportHttp;
 use RiseTechApps\FusionReport\Models\FusionReportGeneration;
 
@@ -16,14 +17,16 @@ class GenerationResource implements \JsonSerializable
         private readonly FusionReportHttp $http,
     ) {}
 
+    /** @throws FusionReportException quando a resposta veio sem `id` */
     public function id(): string
     {
-        return $this->data['id'];
-    }
+        $id = $this->data['id'] ?? null;
 
-    public function reportId(): ?string
-    {
-        return $this->data['report_id'] ?? null;
+        if (! is_string($id) || $id === '') {
+            throw FusionReportException::missingId('generation', $this->data);
+        }
+
+        return $id;
     }
 
     public function mode(): string
@@ -127,7 +130,7 @@ class GenerationResource implements \JsonSerializable
      */
     public function get(): static
     {
-        $this->data = $this->http->get("/api/v1/generations/{$this->id()}");
+        $this->data = $this->http->get('/api/v1/generations/'.rawurlencode($this->id()));
 
         if (config('fusion-report.log_generations', true)) {
             FusionReportGeneration::updateFromGeneration($this);
@@ -173,7 +176,7 @@ class GenerationResource implements \JsonSerializable
      */
     public function cancel(): void
     {
-        $this->http->delete("/api/v1/generations/{$this->id()}");
+        $this->http->delete('/api/v1/generations/'.rawurlencode($this->id()));
 
         if (config('fusion-report.log_generations', true)) {
             FusionReportGeneration::where('generation_uuid', $this->id())
@@ -191,12 +194,12 @@ class GenerationResource implements \JsonSerializable
      * Formatos aceitos: pdf, xlsx, xls, docx, odt, csv, html ('frp' não, já que
      * é o próprio intermediário).
      *
-     * @throws \RiseTechApps\FusionReport\Exceptions\ReportNotFoundException
-     *         quando a geração não tem .frp disponível ou ele já expirou
+     * @throws ReportNotFoundException
+     *                                 quando a geração não tem .frp disponível ou ele já expirou
      */
     public function export(string $format): static
     {
-        $response = $this->http->post("/api/v1/generations/{$this->id()}/export", [
+        $response = $this->http->post('/api/v1/generations/'.rawurlencode($this->id()).'/export', [
             'format' => $format,
         ]);
 
@@ -207,12 +210,12 @@ class GenerationResource implements \JsonSerializable
     public function files(): Collection
     {
         return collect($this->data['files'] ?? [])
-            ->map(fn(array $file) => new FileResource($file, $this->http));
+            ->map(fn (array $file) => new FileResource($file, $this->http));
     }
 
     public function download(string $format): Response
     {
-        $file = $this->files()->first(fn(FileResource $f) => $f->format() === $format);
+        $file = $this->files()->first(fn (FileResource $f) => $f->format() === $format);
 
         if ($file === null) {
             throw new FusionReportException("No file with format '{$format}' found in this generation.");
