@@ -15,7 +15,19 @@ class GenerationResource implements \JsonSerializable
     public function __construct(
         private array $data,
         private readonly FusionReportHttp $http,
+        private readonly ?Quota $quota = null,
     ) {}
+
+    /**
+     * Cota do plano logo depois desta geração, dos headers `X-Quota-*`.
+     *
+     * Só existe na geração recém-criada por `generate()`/`generateAsync()` e com
+     * servidor 1.1+; a consulta (`get()`) não desconta da cota nem a manda.
+     */
+    public function quota(): ?Quota
+    {
+        return $this->quota;
+    }
 
     /** @throws FusionReportException quando a resposta veio sem `id` */
     public function id(): string
@@ -155,6 +167,13 @@ class GenerationResource implements \JsonSerializable
     public function wait(int $timeoutSeconds = 60, int $intervalSeconds = 2): static
     {
         $deadline = microtime(true) + $timeoutSeconds;
+
+        // Criada só com o id (`FusionReport::generation($id)`), a instância não
+        // tem status: sem esta consulta, o loop não entrava e o wait() voltava
+        // na hora, com `unknown`.
+        if (! isset($this->data['status'])) {
+            $this->get();
+        }
 
         while ($this->isPending() || $this->isProcessing()) {
             if (microtime(true) >= $deadline) {

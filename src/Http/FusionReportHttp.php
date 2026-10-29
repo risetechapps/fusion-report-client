@@ -11,6 +11,7 @@ use RiseTechApps\FusionReport\Exceptions\FusionReportException;
 use RiseTechApps\FusionReport\Exceptions\RateLimitException;
 use RiseTechApps\FusionReport\Exceptions\ReportNotFoundException;
 use RiseTechApps\FusionReport\Exceptions\ServerException;
+use RiseTechApps\FusionReport\Resources\Quota;
 
 class FusionReportHttp
 {
@@ -27,6 +28,21 @@ class FusionReportHttp
         $this->assertSuccessful($response);
 
         return $response->json('data') ?? [];
+    }
+
+    /**
+     * POST que também devolve a cota dos headers `X-Quota-*`. Usado pelas rotas
+     * de geração, as únicas que descontam da cota.
+     *
+     * @return array{data: array, quota: ?Quota}
+     */
+    public function postWithQuota(string $endpoint, array $data): array
+    {
+        $response = $this->client()->post($endpoint, $data);
+
+        $this->assertSuccessful($response);
+
+        return ['data' => $response->json('data') ?? [], 'quota' => Quota::fromResponse($response)];
     }
 
     public function get(string $endpoint, array $query = []): array
@@ -175,10 +191,18 @@ class FusionReportHttp
 
         if ($response->status() === 429) {
             $retryAfter = $response->header('Retry-After');
+            $quota = Quota::fromResponse($response);
+
+            // Cota esgotada não traz Retry-After: o que dá a espera é o fim do
+            // período, em X-Quota-Reset. O limite de taxa traz Retry-After.
+            if (! is_numeric($retryAfter) && $quota?->resetsAt() !== null && $quota->remaining() === 0) {
+                $retryAfter = max(0, $quota->resetsAt()->getTimestamp() - time());
+            }
 
             throw new RateLimitException(
                 $this->messageFrom($response) ?? 'Request limit reached for the current plan.',
                 is_numeric($retryAfter) ? (int) $retryAfter : null,
+                $quota,
             );
         }
 

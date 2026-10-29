@@ -189,30 +189,35 @@ class TemplateManager
     }
 
     /**
-     * ATENÇÃO: rota restrita ao dashboard (Sanctum). Autenticado por `X-API-KEY`
-     * o servidor responde 401, convertido em `FusionReportException`. Para
-     * histórico use a tabela local `fusion_report_generations`.
+     * Gerações mais recentes do template, da mais nova para a mais antiga.
+     *
+     * Aceita `X-API-KEY` a partir do servidor 1.1 (antes, só o dashboard, e a
+     * chamada dava 401) e não desconta da cota. Uma página só: `$perPage` vai
+     * até 100.
      *
      * @return Collection<int, GenerationResource>
      */
-    public function generations(string $id): Collection
+    public function generations(string $id, int $perPage = 20): Collection
     {
-        $response = $this->http->get('/api/v1/reports/'.rawurlencode($id).'/generations');
+        $response = $this->http->get('/api/v1/reports/'.rawurlencode($id).'/generations', [
+            'per_page' => max(1, min($perPage, self::PER_PAGE)),
+        ]);
 
         return collect($this->items($response))
             ->map(fn (array $item) => new GenerationResource($item, $this->http));
     }
 
     /**
-     * ATENÇÃO: rota restrita ao dashboard (Sanctum). Autenticado por `X-API-KEY`
-     * o servidor responde 401, convertido em `FusionReportException`. Para
-     * histórico use a tabela local `fusion_report_generations`.
+     * Ver `generations()`. Sem `$theme`, o servidor usa o tema `default`.
      *
      * @return Collection<int, GenerationResource>
      */
-    public function generationsByName(string $name): Collection
+    public function generationsByName(string $name, ?string $theme = null, int $perPage = 20): Collection
     {
-        $response = $this->http->get('/api/v1/reports/name/'.rawurlencode($name).'/generations');
+        $response = $this->http->get('/api/v1/reports/name/'.rawurlencode($name).'/generations', array_filter([
+            'theme' => $theme,
+            'per_page' => max(1, min($perPage, self::PER_PAGE)),
+        ], fn ($value) => $value !== null));
 
         return collect($this->items($response))
             ->map(fn (array $item) => new GenerationResource($item, $this->http));

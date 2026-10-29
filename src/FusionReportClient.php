@@ -2,6 +2,7 @@
 
 namespace RiseTechApps\FusionReport;
 
+use Illuminate\Support\Collection;
 use InvalidArgumentException;
 use RiseTechApps\FusionReport\Builders\ReportRequestBuilder;
 use RiseTechApps\FusionReport\Definitions\ReportDefinition;
@@ -9,6 +10,7 @@ use RiseTechApps\FusionReport\Http\FusionReportHttp;
 use RiseTechApps\FusionReport\Managers\TemplateManager;
 use RiseTechApps\FusionReport\Resources\FileResource;
 use RiseTechApps\FusionReport\Resources\GenerationResource;
+use RiseTechApps\FusionReport\Resources\UsageResource;
 
 class FusionReportClient
 {
@@ -123,5 +125,31 @@ class FusionReportClient
     public function generation(string $generationId): GenerationResource
     {
         return new GenerationResource(['id' => $generationId], $this->http);
+    }
+
+    /**
+     * Consumo da conta no período: plano, requisições, excedente e limite por
+     * minuto. Não desconta da cota. Exige o servidor 1.1+.
+     */
+    public function usage(): UsageResource
+    {
+        return new UsageResource($this->http->get('/api/v1/usage'));
+    }
+
+    /**
+     * Requisições por dia nos últimos `$days` dias (1 a 90), do mais antigo ao
+     * mais recente. Não desconta da cota. Exige o servidor 1.1+.
+     *
+     * @return Collection<int, array{date: string, total: int, success: int, client_error: int, server_error: int}>
+     */
+    public function dailyUsage(int $days = 30): Collection
+    {
+        if ($days < 1 || $days > 90) {
+            throw new InvalidArgumentException("dailyUsage() accepts 1 to 90 days, {$days} given.");
+        }
+
+        $response = $this->http->get('/api/v1/usage/daily', ['days' => $days]);
+
+        return collect($response['days'] ?? []);
     }
 }

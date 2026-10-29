@@ -8,6 +8,9 @@ Laravel client package para comunicação com o **fusion-report-server** — API
 
 - PHP ^8.4
 - Laravel 12
+- fusion-report-server **1.1** ou mais novo (cota nos headers, `usage()` e
+  histórico de gerações pela API key). Com o 1.0, o resto funciona, `quota()`
+  volta `null` e esses três dão erro.
 
 ---
 
@@ -230,18 +233,21 @@ FusionReport::templates()->deleteByName('client_all', 'blue'); // tema específi
 
 ### Histórico de gerações
 
-> **Indisponível via `X-API-KEY`** — ambas as rotas são restritas ao dashboard
-> (Sanctum) e retornam 401. Para histórico na integração por API key, use a
-> tabela local `fusion_report_generations`. Ver
-> *[Métodos indisponíveis via X-API-KEY](#métodos-indisponíveis-via-x-api-key)*.
+Gerações do template, da mais nova para a mais antiga, como
+`GenerationResource`. Não desconta da cota. Uma página só: `perPage` vai de 1 a
+100 (padrão 20).
 
 ```php
 // Por ID do template
 $generations = FusionReport::templates()->generations('uuid-do-template');
 
-// Por nome do template
+// Por nome do template (tema opcional; sem ele, `default`)
 $generations = FusionReport::templates()->generationsByName('client_all');
+$generations = FusionReport::templates()->generationsByName('client_all', theme: 'blue', perPage: 50);
 ```
+
+> Exige o servidor 1.1. No 1.0 as duas rotas eram só do dashboard e
+> respondiam 401 (`AuthenticationException`).
 
 ---
 
@@ -532,7 +538,44 @@ $generation = FusionReport::make('client_all')
 > o caminho recomendado para saber que o relatório ficou pronto.
 >
 > Sem webhook, dá para consultar: `FusionReport::generation($id)->get()` aceita
-> `X-API-KEY` a partir do servidor 1.0.0 e não consome cota.
+> `X-API-KEY` a partir do servidor 1.0.0 e não consome cota. Para esperar no
+> mesmo processo, `FusionReport::generation($id)->wait()`.
+
+### Cota e consumo da conta
+
+Toda geração volta com a cota do plano logo depois dela, lida dos headers
+`X-Quota-*` da resposta:
+
+```php
+$generation = FusionReport::make('client_all')->format('pdf')->generate();
+
+$quota = $generation->quota();      // null com servidor anterior à 1.1
+$quota->used();                     // 8
+$quota->remaining();                // 992 — null em plano ilimitado
+$quota->limit();                    // 1000 — null em plano ilimitado
+$quota->resetsAt();                 // CarbonImmutable: fim do período
+```
+
+Para consultar sem gerar nada (não desconta da cota e responde mesmo com ela
+esgotada):
+
+```php
+$usage = FusionReport::usage();
+
+$usage->planName();            // 'PRO'
+$usage->used();                // 8
+$usage->remaining();           // 992 — null em plano ilimitado
+$usage->resetsAt();            // fim do período
+$usage->overageRequests();     // requisições acima do limite no período
+$usage->rateLimitPerMinute();  // 120
+$usage->toArray();             // a resposta inteira de GET /api/v1/usage
+
+// Requisições por dia, do mais antigo ao mais recente (1 a 90 dias)
+FusionReport::dailyUsage(30)->each(function (array $day) {
+    // ['date' => '2026-10-29', 'total' => 15, 'success' => 12,
+    //  'client_error' => 1, 'server_error' => 2]
+});
+```
 
 ### Formatos
 
@@ -998,8 +1041,13 @@ use RiseTechApps\FusionReport\Exceptions\ServerException;
 try {
     $generation = FusionReport::make('client_all')->format('pdf')->generate();
 } catch (RateLimitException $e) {
-    // Cota do plano esgotada — reenfileire para depois
-    $wait = $e->retryAfter() ?? 60;   // segundos, quando o servidor informa
+    // Cota do plano esgotada ou limite de taxa — reenfileire para depois.
+    // retryAfter(): Retry-After no limite de taxa; fim do período na cota.
+    $wait = $e->retryAfter() ?? 60;
+
+    if ($e->isQuotaExhausted()) {
+        // $e->quota()->resetsAt(): quando a cota volta
+    }
 } catch (AuthenticationException $e) {
     // api_key não configurada (lançada antes da requisição sair),
     // api_key inválida, ou rota restrita ao dashboard
@@ -1034,7 +1082,7 @@ try {
 | 401 | Credencial ausente/inválida, ou rota só de dashboard | `AuthenticationException` |
 | 403 | Recurso pertence a outra conta | `AuthorizationException` |
 | 422 | Campo obrigatório ausente ou arquivo inválido | `FusionReportException` |
-| 429 | Cota de requisições do plano esgotada | `RateLimitException` |
+| 429 | Cota do plano esgotada ou limite de taxa | `RateLimitException` (`isQuotaExhausted()`, `quota()`) |
 | 404 | Template, geração ou arquivo não encontrado | `ReportNotFoundException` |
 | 410 | Arquivo ou `.frp` expirado | `ReportNotFoundException` |
 | 500 | Erro inesperado no servidor | `ServerException` |
@@ -1121,23 +1169,12 @@ sabendo quando ele desiste.
 
 ---
 
-## Métodos indisponíveis via X-API-KEY
+## Log local de gerações
 
-O client autentica exclusivamente por `X-API-KEY`. Parte das rotas do servidor é
-restrita ao dashboard e exige Bearer token do Sanctum — chamá-las com API key
-retorna **401**, que o package converte em `FusionReportException`.
-
-Os métodos abaixo continuam existindo (podem ser usados por quem autentica de
-outra forma), mas **não funcionam na integração por API key**:
-
-| Método | Rota | Alternativa |
-|---|---|---|
-| `templates()->generations($id)` | `GET /api/v1/reports/{id}/generations` | tabela `fusion_report_generations` |
-| `templates()->generationsByName($n)` | `GET /api/v1/reports/name/{n}/generations` | tabela `fusion_report_generations` |
-
-Para histórico de gerações, use o log local do próprio package
-(`fusion_report_generations`), alimentado na geração e atualizado pelo webhook —
-ver *[Report Definitions](#report-definitions-recomendado)* e a trait
+Além do histórico do servidor (`templates()->generations()`), o package mantém
+um log local (`fusion_report_generations`), alimentado na geração e atualizado
+pelo webhook, ligado ao model dono — ver
+*[Report Definitions](#report-definitions-recomendado)* e a trait
 `HasFusionReportGenerations`.
 
 > **O dono precisa de chave UUID.** A coluna `loggable_id` é `uuid`
@@ -1224,8 +1261,6 @@ pode disparar os hooks de novo.
   (`FusionReportGeneration::prunable()`), sem config.
 - Os dois `export()` **não** registram a geração nova em
   `fusion_report_generations`, ao contrário de `generate()` e `generateAsync()`.
-- `generationsByName()` não aceita `theme`. Com o mesmo nome em temas
-  diferentes, não dá para escolher qual histórico buscar.
 - O roteamento do webhook para a `ReportDefinition` casa apenas por `name()`,
   ignorando o tema.
 
@@ -1233,8 +1268,7 @@ pode disparar os hooks de novo.
 
 ## Referência completa — Endpoints cobertos
 
-Rotas marcadas com ⚠️ exigem Sanctum e não funcionam via `X-API-KEY`
-(ver seção acima).
+Todas autenticadas por `X-API-KEY`. As marcadas com ¹ exigem o servidor 1.1.
 
 | Endpoint | Método do package |
 |---|---|
@@ -1246,8 +1280,8 @@ Rotas marcadas com ⚠️ exigem Sanctum e não funcionam via `X-API-KEY`
 | `GET /api/v1/reports/{id}/jrxml` | `templates()->downloadJrxml($id)` |
 | `DELETE /api/v1/reports/{id}` | `templates()->delete($id)` |
 | `DELETE /api/v1/reports/name/{name}?theme=` | `templates()->deleteByName($name, $theme)` |
-| `GET /api/v1/reports/{id}/generations` | `templates()->generations($id)` ⚠️ |
-| `GET /api/v1/reports/name/{name}/generations` | `templates()->generationsByName($name)` ⚠️ |
+| `GET /api/v1/reports/{id}/generations` | `templates()->generations($id)` ¹ |
+| `GET /api/v1/reports/name/{name}/generations?theme=` | `templates()->generationsByName($name, $theme)` ¹ |
 | `POST /api/v1/generate` | `report('name')->generate()` |
 | `POST /api/v1/async` | `report('name')->generateAsync()` |
 | `POST /api/v1/reports/{id}/generate` | `reportById($id)->generate()` |
@@ -1257,3 +1291,5 @@ Rotas marcadas com ⚠️ exigem Sanctum e não funcionam via `X-API-KEY`
 | `GET /api/v1/files/{id}/download` | `file($id)->download()` |
 | `POST /api/v1/files/{id}/export` | `file($id)->export($format)` |
 | `POST /api/v1/generations/{id}/export` | `generation($id)->export($format)` |
+| `GET /api/v1/usage` | `usage()` ¹ |
+| `GET /api/v1/usage/daily?days=` | `dailyUsage($days)` ¹ |

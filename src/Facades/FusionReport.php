@@ -11,6 +11,7 @@ use RiseTechApps\FusionReport\Http\Controllers\GenerateController;
 use RiseTechApps\FusionReport\Managers\TemplateManager;
 use RiseTechApps\FusionReport\Resources\FileResource;
 use RiseTechApps\FusionReport\Resources\GenerationResource;
+use RiseTechApps\FusionReport\Resources\UsageResource;
 
 /**
  * @method static void register(string $name, string $definition)
@@ -20,6 +21,8 @@ use RiseTechApps\FusionReport\Resources\GenerationResource;
  * @method static TemplateManager templates()
  * @method static FileResource file(string $fileId)
  * @method static GenerationResource generation(string $generationId)
+ * @method static UsageResource usage()
+ * @method static \Illuminate\Support\Collection dailyUsage(int $days = 30)
  * @method static ReportDefinition|null definition(string $name)
  * @method static ReportDefinition|null definitionFor(string $templateName)
  *

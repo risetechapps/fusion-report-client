@@ -172,10 +172,9 @@ class ReportRequestBuilder
             ? '/api/v1/reports/'.rawurlencode($this->templateId).'/generate'
             : '/api/v1/generate';
 
-        $generation = new GenerationResource(
-            $this->http->post($endpoint, $this->payloadWithWebhook($webhook)),
-            $this->http,
-        );
+        $response = $this->http->postWithQuota($endpoint, $this->payloadWithWebhook($webhook));
+
+        $generation = new GenerationResource($response['data'], $this->http, $response['quota']);
 
         // Valida AQUI, antes de log, eventos e callback: resposta sem id falha
         // com a causa real em vez de estourar dentro de quem a usa.
@@ -213,9 +212,9 @@ class ReportRequestBuilder
             ? '/api/v1/reports/'.rawurlencode($this->templateId).'/async'
             : '/api/v1/async';
 
-        $response = $this->http->post($endpoint, $this->payloadWithWebhook($webhook));
+        $response = $this->http->postWithQuota($endpoint, $this->payloadWithWebhook($webhook));
 
-        $generation = new GenerationResource($response, $this->http);
+        $generation = new GenerationResource($response['data'], $this->http, $response['quota']);
 
         // Ver generate().
         $generation->id();
