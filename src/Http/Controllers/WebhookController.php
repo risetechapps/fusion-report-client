@@ -47,7 +47,7 @@ class WebhookController extends Controller
             // provado acima. Não é geração: sem `status`, cairia no 422 e o
             // painel mostraria falha com tudo certo.
             if ($webhook->isTest()) {
-                Log::info('[FusionReport] Webhook de teste recebido.', ['event_id' => $webhook->toArray()['id'] ?? null]);
+                Log::info('[FusionReport] Webhook de teste recebido.', ['event_id' => $webhook->deliveryId()]);
 
                 return response()->json(['ok' => true, 'test' => true]);
             }
@@ -99,7 +99,7 @@ class WebhookController extends Controller
                 // Enfileirado a partir da requisição, onde o middleware já
                 // estabeleceu o contexto — pacotes de tenancy com suporte a fila
                 // propagam esse contexto para o job.
-                $job = new ProcessFusionReportWebhook($webhook->toArray(), $webhook->deliveryId());
+                $job = new ProcessFusionReportWebhook($webhook->toArray(), $webhook->deliveryId(), $webhook->event());
 
                 if (is_string($queue)) {
                     $job->onQueue($queue);

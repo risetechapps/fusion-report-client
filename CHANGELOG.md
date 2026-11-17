@@ -7,6 +7,38 @@ e o versionamento segue [SemVer](https://semver.org/lang/pt-BR/).
 
 ---
 
+## [1.2.0] - 2026-11-16
+
+Acompanha o **fusion-report-server 1.3.0**, em que o aviso de geração passou
+a ser uma entrega dos webhooks da conta, com um segredo só para todos os
+webhooks. Continua funcionando com o servidor 1.2.x.
+
+### Atualização
+
+- **Atualize o client antes do servidor 1.3.0.** O servidor 1.3.0 manda a
+  geração dentro do envelope `{id, event, created_at, data}`; o client 1.1.x a
+  procura na raiz do corpo e responde 422.
+- **`FUSION_REPORT_WEBHOOK_SECRET`** passa a ser o segredo da conta, mostrado no
+  painel do Fusion em **Webhooks → Segredo de assinatura**. Para quem já usava o
+  segredo do card "Webhook Secret" do perfil, o valor não muda: o servidor 1.3.0
+  copia esse segredo para a conta.
+
+### Adicionado
+
+- Leitura do envelope do servidor 1.3.0: a geração vem de `data`. O corpo antigo,
+  com a geração na raiz, continua aceito.
+- `WebhookPayload::event()` devolve o `event` do envelope (`report.completed`,
+  `report.failed`, `webhook.test`). Sem o header `X-Webhook-Id`, a deduplicação
+  usa o `id` do envelope.
+- O teste do servidor 1.2.x (`status: "test"`) é respondido como teste, igual ao
+  `webhook.test`.
+
+### Alterado
+
+- `ProcessFusionReportWebhook` recebe o evento como terceiro argumento opcional.
+  Jobs já enfileirados, sem ele, continuam rodando.
+- `WebhookPayload::fromArray()` aceita o evento como terceiro argumento opcional.
+
 ## [1.1.0] - 2026-10-29
 
 Acompanha o **fusion-report-server 1.1.0**. Cota nos headers, `usage()` e o

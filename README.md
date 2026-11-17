@@ -95,7 +95,7 @@ FUSION_REPORT_THEME=default
 FUSION_REPORT_LOCALE=pt_BR
 FUSION_REPORT_FORMAT=pdf
 FUSION_REPORT_WEBHOOK_URL=https://seu-projeto.com/fusion/webhook
-FUSION_REPORT_WEBHOOK_SECRET=seu_secret   # obrigatorio: sem ele o webhook responde 503
+FUSION_REPORT_WEBHOOK_SECRET=seu_secret   # obrigatorio: sem ele o webhook responde 503. Painel do Fusion → Webhooks → "Segredo de assinatura"
 FUSION_REPORT_WEBHOOK_QUEUE=false
 ```
 
@@ -931,9 +931,19 @@ public function handle(Request $request, Closure $next)
 ],
 ```
 
+### Formato do corpo
+
+Desde o servidor 1.3.0 o aviso é uma entrega dos webhooks da conta (pacote de
+API key): o corpo é o envelope `{id, event, created_at, data}`, com a geração em
+`data`, e `event` é `report.completed` ou `report.failed`. O package aceita
+também o formato do servidor até 1.2.x, com a geração na raiz. Os dois chegam ao
+handler do mesmo jeito: os métodos abaixo leem a geração.
+
 ### API do payload
 
 ```php
+$payload->event();         // 'report.completed' | 'report.failed' (null no servidor até 1.2.x)
+$payload->deliveryId();    // X-Webhook-Id (ou o `id` do envelope)
 $payload->uuid();          // ID da geração
 $payload->status();        // 'completed' | 'failed' | ...
 $payload->isSuccess();     // status === 'completed'
@@ -989,7 +999,7 @@ Respostas da rota de webhook:
 |---|---|
 | Processado | 200 |
 | `X-Webhook-Id` já processado | 200 `{"ok": true, "duplicate": true}` |
-| Teste do painel (`event: webhook.test`), assinado | 200 `{"ok": true, "test": true}` |
+| Teste do painel (`event: webhook.test`; no servidor 1.2.x, `status: "test"`), assinado | 200 `{"ok": true, "test": true}` |
 | Assinatura ausente | 401 `{"reason": "missing_signature"}` |
 | Timestamp ausente ou não numérico | 401 `{"reason": "missing_timestamp"}` |
 | Assinatura inválida | 401 `{"reason": "invalid_signature"}` |
@@ -1005,9 +1015,12 @@ Respostas da rota de webhook:
 - `expired_timestamp` — a assinatura confere, mas o timestamp está a mais de
   `webhook.tolerance` segundos do relógio do app. Confira o NTP do servidor.
 - `invalid_signature` — o segredo do app não é o da conta. Compare
-  `FUSION_REPORT_WEBHOOK_SECRET` com o do painel (`GET /api/v1/webhook-secret`);
-  gerar um segredo novo invalida o antigo na hora. Com `config:cache`, rode
-  `php artisan config:clear` depois de trocar o `.env`.
+  `FUSION_REPORT_WEBHOOK_SECRET` com o do painel do Fusion, em **Webhooks →
+  Segredo de assinatura** (o mesmo para todos os webhooks da conta). Gerar um
+  segredo novo invalida o antigo na hora. Com `config:cache`, rode
+  `php artisan config:clear` depois de trocar o `.env`. No mesmo card,
+  "Testar uma URL" manda um `webhook.test` assinado para a rota do app e mostra
+  a resposta.
 
 Para uso manual:
 

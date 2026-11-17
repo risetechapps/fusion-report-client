@@ -9,25 +9,51 @@ use RiseTechApps\FusionReport\Exceptions\WebhookSignatureException;
 
 class WebhookPayload implements \JsonSerializable
 {
+    /**
+     * @param  array<string, mixed>  $data  a geração (o `data` do envelope)
+     */
     private function __construct(
         private readonly array $data,
         private readonly ?string $deliveryId = null,
+        private readonly ?string $event = null,
     ) {}
 
+    /**
+     * Lê o corpo nos dois formatos que o servidor já mandou:
+     *
+     * - servidor 1.3.0+: o envelope dos webhooks do pacote de API key,
+     *   `{id, event, created_at, data}`, com a geração em `data`;
+     * - servidor até 1.2.x: a geração na raiz do corpo.
+     */
     public static function fromRequest(Request $request, ?string $secret = null): static
     {
         if ($secret !== null) {
             static::verifySignature($request, $secret);
         }
 
+        $body = $request->json()->all();
         $deliveryId = trim((string) $request->header('X-Webhook-Id'));
+        $event = null;
 
-        return new static($request->json()->all(), $deliveryId === '' ? null : $deliveryId);
+        if (static::isEnvelope($body)) {
+            $event = $body['event'];
+            $deliveryId = $deliveryId !== '' ? $deliveryId : trim((string) ($body['id'] ?? ''));
+            $body = $body['data'];
+        }
+
+        return new static($body, $deliveryId === '' ? null : $deliveryId, $event);
     }
 
-    public static function fromArray(array $data, ?string $deliveryId = null): static
+    /** @param  array<string, mixed>  $data  a geração, como toArray() devolve */
+    public static function fromArray(array $data, ?string $deliveryId = null, ?string $event = null): static
     {
-        return new static($data, $deliveryId);
+        return new static($data, $deliveryId, $event);
+    }
+
+    /** O envelope do pacote: `event` texto e `data` objeto. */
+    private static function isEnvelope(array $body): bool
+    {
+        return is_string($body['event'] ?? null) && is_array($body['data'] ?? null);
     }
 
     /**
@@ -46,20 +72,27 @@ class WebhookPayload implements \JsonSerializable
     }
 
     /**
-     * Tipo do evento, quando o servidor manda no formato de evento
-     * (`{id, event, created_at, data}`). Os callbacks de geração não têm.
+     * Tipo do evento: `report.completed`, `report.failed` ou `webhook.test`.
+     * Null nos callbacks do servidor até 1.2.x, que não usavam o envelope.
      */
     public function event(): ?string
     {
+        if ($this->event !== null) {
+            return $this->event;
+        }
+
         $event = $this->data['event'] ?? null;
 
         return is_string($event) ? $event : null;
     }
 
-    /** Disparado pelo botão "testar webhook" do painel do servidor. */
+    /**
+     * Teste do painel do servidor: `webhook.test` (Webhooks → "Testar uma URL")
+     * ou, no servidor 1.2.x, a geração com `status: "test"`.
+     */
     public function isTest(): bool
     {
-        return $this->event() === 'webhook.test';
+        return $this->event() === 'webhook.test' || ($this->data['status'] ?? null) === 'test';
     }
 
     public function uuid(): string
@@ -105,6 +138,7 @@ class WebhookPayload implements \JsonSerializable
             ->map(fn (array $d) => new WebhookDownload($d));
     }
 
+    /** A geração (o `data` do envelope), sem o envelope. */
     public function toArray(): array
     {
         return $this->data;

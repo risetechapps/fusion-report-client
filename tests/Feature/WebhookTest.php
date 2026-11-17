@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
@@ -11,6 +12,7 @@ use RiseTechApps\FusionReport\Facades\FusionReport;
 use RiseTechApps\FusionReport\Jobs\ProcessFusionReportWebhook;
 use RiseTechApps\FusionReport\Models\FusionReportGeneration;
 use RiseTechApps\FusionReport\Tests\Fixtures\WebhookReport;
+use RiseTechApps\FusionReport\Webhook\WebhookPayload;
 
 uses(RefreshDatabase::class);
 
@@ -329,4 +331,85 @@ it('enfileira com o X-Webhook-Id e o libera quando o job esgota as tentativas', 
 
     // O "Reenviar" do painel volta a ser aceito.
     expect(Cache::has('fusion-report:webhook-delivery:whd_1'))->toBeFalse();
+});
+
+// ── envelope do servidor 1.3.0+ ──────────────────────────────────────────
+
+describe('envelope do pacote (servidor 1.3.0+)', function () {
+    beforeEach(function () {
+        // Como o WebhookDispatcher::dispatchTo do servidor monta o corpo.
+        $this->envelope = fn (array $data, string $event = 'report.completed', string $id = 'whd_1') => [
+            'id' => $id,
+            'event' => $event,
+            'created_at' => '2026-11-16T19:53:45-03:00',
+            'data' => $data,
+        ];
+    });
+
+    it('processa a geração que vem em data', function () {
+        Event::fake([ReportGenerationCompleted::class]);
+        ($this->createRecord)();
+
+        ($this->deliver)(($this->envelope)($this->payload))->assertOk();
+
+        expect(FusionReportGeneration::first()->status)->toBe('completed')
+            ->and(WebhookReport::$calls)->toBe(1);
+        Event::assertDispatched(ReportGenerationCompleted::class, fn ($e) => $e->generation->id() === 'g-1');
+    });
+
+    it('expõe o evento e o id da entrega', function () {
+        $body = json_encode(($this->envelope)($this->payload));
+        $request = Request::create('/fusion/webhook', 'POST', server: ($this->signed)($body, id: null), content: $body);
+
+        $webhook = WebhookPayload::fromRequest($request, 'segredo');
+
+        expect($webhook->event())->toBe('report.completed')
+            ->and($webhook->deliveryId())->toBe('whd_1')
+            ->and($webhook->uuid())->toBe('g-1')
+            ->and($webhook->toArray())->toBe($this->payload);
+    });
+
+    it('processa a falha', function () {
+        ($this->createRecord)();
+
+        ($this->deliver)(($this->envelope)(['id' => 'g-1', 'status' => 'failed', 'template_name' => 'webhook_report'], 'report.failed'))
+            ->assertOk();
+
+        expect(FusionReportGeneration::first()->status)->toBe('failed');
+    });
+
+    it('deduplica pelo id do envelope quando o header não vem', function () {
+        ($this->createRecord)();
+
+        ($this->deliver)(($this->envelope)($this->payload, id: 'evt_9'), id: null)->assertOk();
+        ($this->deliver)(($this->envelope)($this->payload, id: 'evt_9'), id: null)->assertOk()->assertJsonPath('duplicate', true);
+
+        expect(WebhookReport::$calls)->toBe(1);
+    });
+
+    it('recusa com 422 envelope sem a geração', function () {
+        ($this->deliver)(($this->envelope)(['message' => 'x']))->assertStatus(422);
+    });
+
+    it('leva o evento para o job da fila', function () {
+        Queue::fake();
+        config(['fusion-report.webhook.queue' => 'webhooks']);
+        ($this->createRecord)();
+
+        ($this->deliver)(($this->envelope)($this->payload))->assertOk()->assertJsonPath('queued', true);
+
+        Queue::assertPushed(ProcessFusionReportWebhook::class, function (ProcessFusionReportWebhook $job) {
+            $payload = (fn () => [$this->payload, $this->event])->call($job);
+
+            return $payload[0]['id'] === 'g-1' && $payload[1] === 'report.completed';
+        });
+    });
+});
+
+it('aceita o teste do servidor 1.2.x, que mandava status "test"', function () {
+    ($this->deliver)(['id' => 'g-teste', 'status' => 'test', 'mode' => 'async'])
+        ->assertOk()
+        ->assertExactJson(['ok' => true, 'test' => true]);
+
+    expect(WebhookReport::$calls)->toBe(0);
 });

@@ -39,11 +39,12 @@ class ProcessFusionReportWebhook implements ShouldQueue
     public function __construct(
         private readonly array $payload,
         private readonly ?string $deliveryId = null,
+        private readonly ?string $event = null,
     ) {}
 
     public function handle(WebhookHandler $handler): void
     {
-        $handler->handle(WebhookPayload::fromArray($this->payload, $this->deliveryId));
+        $handler->handle(WebhookPayload::fromArray($this->payload, $this->deliveryId, $this->event));
     }
 
     /**
@@ -67,7 +68,7 @@ class ProcessFusionReportWebhook implements ShouldQueue
             'error' => $e?->getMessage(),
         ]);
 
-        $webhook = WebhookPayload::fromArray($this->payload, $this->deliveryId);
+        $webhook = WebhookPayload::fromArray($this->payload, $this->deliveryId, $this->event);
 
         // Libera o X-Webhook-Id: sem isso, o "Reenviar" do painel cairia em
         // "entrega repetida" e o callback perdido não teria mais como voltar.
